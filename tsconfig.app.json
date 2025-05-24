@@ -1,5 +1,6 @@
 {
   "compilerOptions": {
+    "types": ["@webgpu/types"],
     "baseUrl": ".",
     "paths": {
       "@/*": [
@@ -25,7 +26,6 @@
     "strict": true,
     "noUnusedLocals": true,
     "noUnusedParameters": true,
-    "erasableSyntaxOnly": true,
     "noFallthroughCasesInSwitch": true,
     "noUncheckedSideEffectImports": true
   },
