@@ -1,12 +1,10 @@
 import './App.css'
-import { GameOfLifeSimple } from './components/GameOfLifeSimple'
+import SmokeSimulationComponent from './SmokeSimulation'
 
 function App() {
   return (
-    <div className="p-5">
-      <div className="max-w-2xl mx-auto flex justify-center">
-        <GameOfLifeSimple />
-      </div>
+    <div>
+      <SmokeSimulationComponent />
     </div>
   )
 }

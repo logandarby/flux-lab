@@ -1,5 +1,26 @@
 # Fluid Simulation
 
+## Inspo
+
+- L-Drones https://codepen.io/teropa/full/opjrBE
+    - kind of similar to my idea
+- Magic sketchpad 
+    - Inspired feeling
+- WebGL fluid simulation https://paveldogreat.github.io/WebGL-Fluid-Simulation/
+    - for smoke simulation
+- Some cool AV stuff from an artist
+    - https://ctpt.co/
+- Google experiments have some cool things
+    - Patatap is a great artistic experiement
+    - Enough is a beautiful interactive audiobook
+- Tero. Some cool experiments https://teropa.info/
+
+## Fluid Simulation 
+
+- For better poisson eq solvers, see Bolz et al. 2003, Goodnight et al. 2003, and Krüger and Westermann 2003.
+
+## Notes
+
 - Maybe not just smoke, but water, fire, air, earth
     - or maybe split up into four quadrants w/ different intstruments
     - start w/ one instrument -- arp would be easy
@@ -25,3 +46,9 @@
 - ONLY applies to notes in its vicinity -- some smoothing algorithm
 - maybe everything is sustained normally by default
     - vorticity around notes creates an ARP effect
+
+### Possible technology to get audio
+
+- tidal/strudel
+    - live coding
+- tone.js
