@@ -1,7 +1,8 @@
-import { useRef } from "react";
-import { useEffect } from "react";
+import { useCallback, useRef } from "react";
+import { useEffect, useState } from "react";
 import textureShader from "./textureShader.wgsl?raw";
 import divergenceShaderTemplate from "./shaders/divergenceShader.wgsl?raw";
+import advectionShaderTemplate from "./shaders/advectionShader.wgsl?raw";
 
 // Constants
 
@@ -10,7 +11,8 @@ const CANVAS_HEIGHT = 512;
 const GRID_SIZE = 16; // 8x8 grid
 const FLOAT_BYTES = 4;
 const WORKGROUP_SIZE = 8;
-const SIMULATION_TIME_STEP_MS = 1000 / 60;
+const WORKGROUP_COUNT = Math.ceil(GRID_SIZE / WORKGROUP_SIZE);
+// const SIMULATION_TIME_STEP_MS = 1000 / 60;
 
 enum WebGPUErrorCode {
   WEBGPU_NOT_SUPPORTED,
@@ -155,7 +157,7 @@ class TextureManager<TextureID extends string | number> {
       throw new Error(`Texture '${name}' not found`);
     }
     if (!("back" in textures)) {
-      return;
+      throw new Error(`Cannot swap static single texture ${name}`);
     }
     const { front, back } = textures;
     this.textures.set(name, {
@@ -238,7 +240,7 @@ abstract class ComputePass<TextureID extends string | number> {
     pass.setPipeline(this.pipeline);
     pass.setBindGroup(0, bindGroup);
 
-    pass.dispatchWorkgroups(workgroupCount);
+    pass.dispatchWorkgroups(workgroupCount, workgroupCount);
   }
 }
 
@@ -356,6 +358,99 @@ class DivergencePass extends ComputePass<TextureID> {
   }
 }
 
+class AdvectionPass extends ComputePass<TextureID> {
+
+  private readonly linearSampler;
+
+  constructor(device: GPUDevice) {
+    super({
+      name: "Advection Pass",
+      entryPoint: "compute_main",
+      shader: device.createShaderModule({
+        label: "Advection Shader",
+        code: injectShaderVariables(advectionShaderTemplate, {WORKGROUP_SIZE}),
+      })
+    }, device);
+    this.linearSampler = device.createSampler({
+      label: "Linear Sampler",
+      magFilter: "linear",
+      minFilter: "linear",
+      addressModeU: "clamp-to-edge",
+      addressModeV: "clamp-to-edge",
+    });
+  }
+
+  protected createBindGroupLayout(): GPUBindGroupLayout {
+    return this.device.createBindGroupLayout({
+      label: "Advection Bind Group Layout",
+      entries: [
+        // Velocity
+        {
+          binding: 0,
+          visibility: GPUShaderStage.COMPUTE,
+          texture: {
+            sampleType: "unfilterable-float",
+            viewDimension: "2d",
+          }
+        },
+        // Advection In
+        {
+          binding: 1,
+          visibility: GPUShaderStage.COMPUTE,
+          texture: {
+            sampleType: "float",
+            viewDimension: "2d",
+          }
+        },
+        // Advection Out
+        {
+          binding: 2,
+          visibility: GPUShaderStage.COMPUTE,
+          storageTexture: {
+            format: "rgba16float",
+            access: "write-only",
+            viewDimension: "2d",
+          }
+        },
+        // Sampler
+        {
+          binding: 3,
+          visibility: GPUShaderStage.COMPUTE,
+          sampler: {
+            type: "filtering"
+          }
+        }
+      ]
+    })
+  }
+
+  protected createBindGroup(textureManager: TextureManager<TextureID>): GPUBindGroup {
+    return this.device.createBindGroup({
+      label: "Advection Bind Group",
+      layout: this.bindGroupLayout,
+      entries: [
+        {
+          binding: 0,
+          resource: textureManager.getCurrentTexture("velocity").createView()
+        },
+        {
+          binding: 1,
+          resource: textureManager.getCurrentTexture("velocity").createView()
+        },
+        {
+          binding: 2,
+          resource: textureManager.getBackTexture("velocity").createView()
+        },
+        {
+          binding: 3,
+          resource: this.linearSampler,
+        }
+      ]
+    })
+  }
+
+}
+
 class RenderTexturePass extends RenderPass<TextureID> {
   private readonly sampler: GPUSampler;
 
@@ -399,7 +494,7 @@ class RenderTexturePass extends RenderPass<TextureID> {
       entries: [
         {
           binding: 0,
-          resource: textureManager.getCurrentTexture("divergence").createView(),
+          resource: textureManager.getCurrentTexture("velocity").createView(),
         },
         {
           binding: 1,
@@ -418,14 +513,14 @@ function initializeVelocityField(
   const v = [1.0, 1.0];
   // prettier-ignore
   const velocityData = new Float32Array([
-    _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _,
+    _, _, _, _, _, _, v, _, _, _, _, _, _, _, _, _,
     _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _,
     _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _,
     _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _,
     _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _,
     _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _,
     _, _, _, _, _, _, v, v, v, _, _, _, _, _, _, _,
-    _, _, _, _, _, _, _, v, v, v, _, _, _, _, _, _,
+    _, v, _, _, _, _, _, v, v, v, _, _, _, _, _, _,
     _, _, _, _, _, _, _, _, v, v, v, _, _, _, _, _,
     _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _,
     _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _,
@@ -447,6 +542,10 @@ function initializeVelocityField(
 
 class SmokeSimulation {
   private resources: WebGPUResources | null = null;
+  private textureManager: TextureManager<TextureID> | null = null;
+  private divergencePass: DivergencePass | null = null;
+  private advectionPass: AdvectionPass | null = null;
+  private renderingPass: RenderTexturePass | null = null;
 
   public async initialize(canvasRef: React.RefObject<HTMLCanvasElement>) {
     if (!canvasRef.current) {
@@ -456,33 +555,25 @@ class SmokeSimulation {
       );
     }
     this.resources = await initializeWebGPU(canvasRef.current);
-  }
 
-  public render() {
-    if (!this.resources) {
-      throw new WebGPUError(
-        "Could not render: Resources not found. Run initialize() first.",
-        WebGPUErrorCode.NO_RESOURCES
-      );
-    }
+    // Initialize all the simulation components
+    this.textureManager = new TextureManager<TextureID>(this.resources.device);
 
-    const textureManager = new TextureManager<TextureID>(this.resources.device);
-
-    textureManager.createTexture("velocity", {
+    this.textureManager.createPingPongTexture("velocity", {
       label: "Velocity Texture",
       size: [GRID_SIZE, GRID_SIZE],
-      format: "rg32float",
+      format: "rgba16float",
       usage:
         GPUTextureUsage.STORAGE_BINDING |
         GPUTextureUsage.TEXTURE_BINDING |
         GPUTextureUsage.COPY_DST,
     });
     initializeVelocityField(
-      textureManager.getCurrentTexture("velocity"),
+      this.textureManager.getCurrentTexture("velocity"),
       this.resources.device
     );
 
-    textureManager.createTexture("divergence", {
+    this.textureManager.createTexture("divergence", {
       label: "Divergence texture",
       size: [GRID_SIZE, GRID_SIZE],
       format: "r32float",
@@ -492,12 +583,13 @@ class SmokeSimulation {
         GPUTextureUsage.COPY_DST,
     });
 
-    const divergencePass = new DivergencePass(this.resources.device);
+    this.divergencePass = new DivergencePass(this.resources.device);
+    this.advectionPass = new AdvectionPass(this.resources.device);
     const textureShaderModule = this.resources.device.createShaderModule({
       label: "Texture Shader",
       code: textureShader,
     });
-    const renderingPass = new RenderTexturePass({
+    this.renderingPass = new RenderTexturePass({
       name: "Texture Rendering",
         vertex: {
           module: textureShaderModule,
@@ -514,25 +606,35 @@ class SmokeSimulation {
         },
     }, this.resources.device);
 
-    // For rendering the divergence texture
+    // Render the initial state
+    this.step({ renderOnly: true });
+  }
+
+  public step({ renderOnly }: { renderOnly: boolean } = { renderOnly: false }) {
+    if (!this.resources || !this.textureManager || !this.advectionPass || !this.renderingPass) {
+      throw new WebGPUError(
+        "Could not step simulation: Resources not initialized. Run initialize() first.",
+        WebGPUErrorCode.NO_RESOURCES
+      );
+    }
 
     const commandEncoder = this.resources.device.createCommandEncoder();
 
-    // STEP 1: Compute Pass
+    if (!renderOnly) {
+      // Compute Pass (Advection)
+      const advectionPassEncoder = commandEncoder.beginComputePass({
+        label: "Advection Compute pass",
+      });
+      this.advectionPass.execute(
+        advectionPassEncoder,
+        this.textureManager,
+        WORKGROUP_COUNT,
+      );
+      advectionPassEncoder.end();
+      this.textureManager.swap("velocity");
+    }
 
-    const divergencePassEncoder = commandEncoder.beginComputePass({
-      label: "Divergence Render Pass",
-    });
-    const workgroupCount = Math.ceil(GRID_SIZE / WORKGROUP_SIZE);
-    divergencePass.execute(
-      divergencePassEncoder,
-      textureManager,
-      workgroupCount
-    );
-    divergencePassEncoder.end();
-
-    // STEP 2: Rendering Pass
-
+    // Render Pass
     const renderPassEncoder = commandEncoder.beginRenderPass({
       label: "Texture Render Pass",
       colorAttachments: [
@@ -545,9 +647,9 @@ class SmokeSimulation {
       ],
     });
 
-    renderingPass.execute(renderPassEncoder, {
+    this.renderingPass.execute(renderPassEncoder, {
       vertexCount: 6,
-    }, textureManager);
+    }, this.textureManager);
 
     renderPassEncoder.end();
     this.resources.device.queue.submit([commandEncoder.finish()]);
@@ -557,6 +659,8 @@ class SmokeSimulation {
 function SmokeSimulationComponent() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const smokeSimulation = useRef<SmokeSimulation | null>(null);
+  const [isInitialized, setIsInitialized] = useState(false);
+  const [initError, setInitError] = useState<string | null>(null);
 
   useEffect(() => {
     const runSimulation = async () => {
@@ -567,19 +671,47 @@ function SmokeSimulationComponent() {
       smokeSimulation.current = new SmokeSimulation();
       try {
         await smokeSimulation.current.initialize(canvasRef);
-        smokeSimulation.current.render();
+        setIsInitialized(true);
+        setInitError(null);
       } catch (error) {
         console.error("Failed to initialize smoke simulation:", error);
         smokeSimulation.current = null;
+        setIsInitialized(false);
+        setInitError(error instanceof Error ? error.message : "Unknown error");
       }
     };
     runSimulation();
   }, []);
 
+  const handleStep = useCallback(() => {
+    if (smokeSimulation.current && isInitialized) {
+      try {
+        smokeSimulation.current.step();
+      } catch (error) {
+        console.error("Failed to step simulation:", error);
+      }
+    }
+  }, [isInitialized, smokeSimulation.current]);
+
   return (
     <div className="p-5">
-      <div className="max-w-2xl mx-auto flex justify-center">
+      <div className="max-w-2xl mx-auto flex flex-col items-center gap-4">
         <canvas width={CANVAS_WIDTH} height={CANVAS_HEIGHT} ref={canvasRef} />
+        {initError && (
+          <div className="text-red-500 text-sm max-w-md text-center">
+            Error: {initError}
+          </div>
+        )}
+        <button
+          onClick={handleStep}
+          className="px-6 py-2 bg-blue-500 hover:bg-blue-600 text-white font-medium rounded-lg transition-colors duration-200 disabled:bg-gray-400 disabled:cursor-not-allowed"
+          disabled={!isInitialized}
+        >
+          Step
+        </button>
+        <div className="text-sm text-gray-600">
+          Status: {isInitialized ? "Ready" : "Initializing..."}
+        </div>
       </div>
     </div>
   );
