@@ -34,6 +34,7 @@ const testsRoute = createRoute({
 });
 
 // Test component that handles the routing logic
+// eslint-disable-next-line react-refresh/only-export-components
 function TestComponent() {
   const { testId } = useParams({ from: '/tests/$testId' });
 
