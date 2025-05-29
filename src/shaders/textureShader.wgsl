@@ -29,5 +29,5 @@ fn vertex_main(
 
 @fragment
 fn fragment_main(input: VertexOutput) -> @location(0)vec4f {
-    return textureSample(texture, textureSampler, input.texCoord);
+    return abs(textureSample(texture, textureSampler, input.texCoord));
 }
