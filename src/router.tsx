@@ -5,10 +5,10 @@ import {
   Link,
   Outlet,
   useParams,
-} from '@tanstack/react-router';
-import SmokeSimulationComponent from './SmokeSimulation';
-import TestsPage from './pages/TestsPage';
-import AdvectionTestComponent from './components/tests/AdvectionTestComponent';
+} from "@tanstack/react-router";
+import SmokeSimulationComponent from "./SmokeSimulation";
+import TestsPage from "./pages/TestsPage";
+import AdvectionTestComponent from "./components/tests/AdvectionTestComponent";
 
 // Root route
 const rootRoute = createRootRoute({
@@ -18,7 +18,7 @@ const rootRoute = createRootRoute({
 // Home route
 const indexRoute = createRoute({
   getParentRoute: () => rootRoute,
-  path: '/',
+  path: "/",
   component: () => (
     <div className="p-8">
       <SmokeSimulationComponent />
@@ -29,17 +29,17 @@ const indexRoute = createRoute({
 // Tests listing route
 const testsRoute = createRoute({
   getParentRoute: () => rootRoute,
-  path: '/tests',
+  path: "/tests",
   component: TestsPage,
 });
 
 // Test component that handles the routing logic
 // eslint-disable-next-line react-refresh/only-export-components
 function TestComponent() {
-  const { testId } = useParams({ from: '/tests/$testId' });
+  const { testId } = useParams({ from: "/tests/$testId" });
 
   switch (testId) {
-    case 'advection':
+    case "advection":
       return <AdvectionTestComponent />;
     default:
       return (
@@ -64,7 +64,7 @@ function TestComponent() {
 // Individual test route
 const testRoute = createRoute({
   getParentRoute: () => rootRoute,
-  path: '/tests/$testId',
+  path: "/tests/$testId",
   component: TestComponent,
 });
 
@@ -75,7 +75,7 @@ const routeTree = rootRoute.addChildren([indexRoute, testsRoute, testRoute]);
 export const router = createRouter({ routeTree });
 
 // Register router for typesafety
-declare module '@tanstack/react-router' {
+declare module "@tanstack/react-router" {
   interface Register {
     router: typeof router;
   }

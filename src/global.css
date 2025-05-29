@@ -1,5 +1,7 @@
 @layer base {
-    :root, html, body {
-        font-family: "Inter";
-    }
+  :root,
+  html,
+  body {
+    font-family: "Inter";
+  }
 }

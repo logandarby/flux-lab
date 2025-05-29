@@ -1,5 +1,5 @@
-import { useCallback, useRef, useEffect, useState } from 'react';
-import SimulationControls from '../ui/SimulationControls';
+import { useCallback, useRef, useEffect, useState } from "react";
+import SimulationControls from "../ui/SimulationControls";
 
 const CANVAS_DEFAULT = 512;
 
@@ -50,7 +50,7 @@ function BaseTestComponent({
       } catch (error) {
         console.error(`Failed to initialize ${title}:`, error);
         setIsInitialized(false);
-        setInitError(error instanceof Error ? error.message : 'Unknown error');
+        setInitError(error instanceof Error ? error.message : "Unknown error");
       }
     };
     runSimulation();

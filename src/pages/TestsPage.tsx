@@ -1,4 +1,4 @@
-import { Link, useRouter } from '@tanstack/react-router';
+import { Link, useRouter } from "@tanstack/react-router";
 import {
   Card,
   CardContent,
@@ -6,52 +6,52 @@ import {
   CardHeader,
   CardTitle,
   CardAction,
-} from '@/components/ui/card';
-import { Button } from '@/components/ui/button';
-import { cn } from '@/lib/utils';
+} from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
 
 interface TestInfo {
   id: string;
   title: string;
   description: string;
-  status: 'stable' | 'experimental' | 'planned';
+  status: "stable" | "experimental" | "planned";
 }
 
 const tests: TestInfo[] = [
   {
-    id: 'advection',
-    title: 'Advection Test',
+    id: "advection",
+    title: "Advection Test",
     description:
-      'Tests fluid velocity advection with manual bilinear interpolation and rg32float textures.',
-    status: 'stable',
+      "Tests fluid velocity advection with manual bilinear interpolation and rg32float textures.",
+    status: "stable",
   },
   {
-    id: 'divergence',
-    title: 'Divergence Test',
+    id: "divergence",
+    title: "Divergence Test",
     description:
-      'Tests velocity field divergence calculation for incompressible flow.',
-    status: 'planned',
+      "Tests velocity field divergence calculation for incompressible flow.",
+    status: "planned",
   },
 ];
 
 function TestsPage() {
   const router = useRouter();
 
-  const getStatusColor = (status: TestInfo['status']) => {
+  const getStatusColor = (status: TestInfo["status"]) => {
     switch (status) {
-      case 'stable':
-        return 'bg-green-100 text-green-800 border-green-200';
-      case 'experimental':
-        return 'bg-yellow-100 text-yellow-800 border-yellow-200';
-      case 'planned':
-        return 'bg-gray-100 text-gray-800 border-gray-200';
+      case "stable":
+        return "bg-green-100 text-green-800 border-green-200";
+      case "experimental":
+        return "bg-yellow-100 text-yellow-800 border-yellow-200";
+      case "planned":
+        return "bg-gray-100 text-gray-800 border-gray-200";
       default:
-        return 'bg-gray-100 text-gray-800 border-gray-200';
+        return "bg-gray-100 text-gray-800 border-gray-200";
     }
   };
 
   const handleTestNavigation = (testId: string) => {
-    router.navigate({ to: '/tests/$testId', params: { testId } });
+    router.navigate({ to: "/tests/$testId", params: { testId } });
   };
 
   return (
@@ -76,7 +76,7 @@ function TestsPage() {
                 <CardAction>
                   <span
                     className={cn(
-                      'px-3 py-1 rounded-full text-xs font-medium border',
+                      "px-3 py-1 rounded-full text-xs font-medium border",
                       getStatusColor(test.status)
                     )}
                   >
@@ -90,7 +90,7 @@ function TestsPage() {
                   {test.description}
                 </CardDescription>
 
-                {test.status === 'stable' ? (
+                {test.status === "stable" ? (
                   <Button
                     onClick={() => handleTestNavigation(test.id)}
                     className="w-full"
@@ -99,7 +99,7 @@ function TestsPage() {
                   </Button>
                 ) : (
                   <Button disabled variant="secondary" className="w-full">
-                    {test.status === 'experimental' ? 'In Progress' : 'Planned'}
+                    {test.status === "experimental" ? "In Progress" : "Planned"}
                   </Button>
                 )}
               </CardContent>

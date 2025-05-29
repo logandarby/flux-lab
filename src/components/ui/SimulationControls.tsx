@@ -1,6 +1,6 @@
-import { useCallback, useEffect } from 'react';
-import { Button } from './button';
-import { cn } from '@/lib/utils';
+import { useCallback, useEffect } from "react";
+import { Button } from "./button";
+import { cn } from "@/lib/utils";
 
 interface SimulationControlsProps {
   isInitialized: boolean;
@@ -24,21 +24,21 @@ function SimulationControls({
   // Get status text and styling
   const getStatus = () => {
     if (!isInitialized)
-      return { text: 'Initializing...', type: 'loading' as const };
-    if (isPlaying) return { text: 'Playing', type: 'playing' as const };
-    return { text: 'Ready', type: 'ready' as const };
+      return { text: "Initializing...", type: "loading" as const };
+    if (isPlaying) return { text: "Playing", type: "playing" as const };
+    return { text: "Ready", type: "ready" as const };
   };
 
-  const getStatusColor = (type: 'loading' | 'playing' | 'ready') => {
+  const getStatusColor = (type: "loading" | "playing" | "ready") => {
     switch (type) {
-      case 'playing':
-        return 'bg-green-100 text-green-800 border-green-200';
-      case 'ready':
-        return 'bg-blue-100 text-blue-800 border-blue-200';
-      case 'loading':
-        return 'bg-gray-100 text-gray-800 border-gray-200';
+      case "playing":
+        return "bg-green-100 text-green-800 border-green-200";
+      case "ready":
+        return "bg-blue-100 text-blue-800 border-blue-200";
+      case "loading":
+        return "bg-gray-100 text-gray-800 border-gray-200";
       default:
-        return 'bg-gray-100 text-gray-800 border-gray-200';
+        return "bg-gray-100 text-gray-800 border-gray-200";
     }
   };
 
@@ -97,19 +97,19 @@ function SimulationControls({
       }
 
       switch (event.code) {
-        case 'Space':
+        case "Space":
           event.preventDefault();
           if (isInitialized && onStep) {
             handleTogglePlayPause();
           }
           break;
-        case 'KeyR':
+        case "KeyR":
           event.preventDefault();
           if (isInitialized && onRestart) {
             handleRestart();
           }
           break;
-        case 'KeyS':
+        case "KeyS":
           event.preventDefault();
           if (isInitialized && onStep && !isPlaying) {
             handleStep();
@@ -118,8 +118,8 @@ function SimulationControls({
       }
     };
 
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
   }, [
     isInitialized,
     isPlaying,
@@ -208,7 +208,7 @@ function SimulationControls({
         </h3>
         <span
           className={cn(
-            'px-3 py-1 rounded-full text-xs font-medium border',
+            "px-3 py-1 rounded-full text-xs font-medium border",
             getStatusColor(status.type)
           )}
         >

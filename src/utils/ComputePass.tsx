@@ -1,4 +1,4 @@
-import type { TextureManager } from './TextureManager';
+import type { TextureManager } from "./TextureManager";
 
 export interface ComputePassConfig {
   readonly name: string;

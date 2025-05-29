@@ -22,7 +22,7 @@ export class WebGPUError extends Error {
     public readonly code?: WebGPUErrorCode
   ) {
     super(message);
-    this.name = 'WebGPUError';
+    this.name = "WebGPUError";
   }
 }
 
@@ -37,7 +37,7 @@ export async function initializeWebGPU(
   // Check WebGPU support
   if (!navigator.gpu) {
     throw new WebGPUError(
-      'WebGPU is not supported on this browser. Please use Google Chrome or Microsoft Edge to run this application',
+      "WebGPU is not supported on this browser. Please use Google Chrome or Microsoft Edge to run this application",
       WebGPUErrorCode.WEBGPU_NOT_SUPPORTED
     );
   }
@@ -45,20 +45,20 @@ export async function initializeWebGPU(
   // Request adapter
   const adapter = await navigator.gpu.requestAdapter();
   if (!adapter) {
-    throw new WebGPUError('No GPU Adapter found', WebGPUErrorCode.NO_ADAPTER);
+    throw new WebGPUError("No GPU Adapter found", WebGPUErrorCode.NO_ADAPTER);
   }
 
   // Request device
   const device = await adapter.requestDevice();
   if (!device) {
-    throw new WebGPUError('No GPU Device Found', WebGPUErrorCode.NO_DEVICE);
+    throw new WebGPUError("No GPU Device Found", WebGPUErrorCode.NO_DEVICE);
   }
 
   // Setup canvas context
-  const context = canvas.getContext('webgpu');
+  const context = canvas.getContext("webgpu");
   if (!context) {
     throw new WebGPUError(
-      'Could not get Canvas Context',
+      "Could not get Canvas Context",
       WebGPUErrorCode.NO_CONTEXT
     );
   }

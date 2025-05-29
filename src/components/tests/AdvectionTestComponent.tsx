@@ -1,14 +1,14 @@
-import { useRef, useState } from 'react';
-import BaseTestComponent from './BaseTestComponent';
-import textureShader from '../../shaders/textureShader.wgsl?raw';
-import { TextureManager } from '@/utils/TextureManager';
+import { useRef, useState } from "react";
+import BaseTestComponent from "./BaseTestComponent";
+import textureShader from "../../shaders/textureShader.wgsl?raw";
+import { TextureManager } from "@/utils/TextureManager";
 import {
   type WebGPUResources,
   WebGPUError,
   WebGPUErrorCode,
   initializeWebGPU,
-} from '@/utils/webgpu.utils';
-import { AdvectionPass, RenderTexturePass } from '@/SmokeSimulation';
+} from "@/utils/webgpu.utils";
+import { AdvectionPass, RenderTexturePass } from "@/SmokeSimulation";
 
 const GRID_SIZE = 16; // 8x8 grid
 const WORKGROUP_SIZE = 8;
@@ -16,14 +16,14 @@ const WORKGROUP_COUNT = Math.ceil(GRID_SIZE / WORKGROUP_SIZE);
 
 // Direction enumeration for cardinal and ordinal directions
 enum AdvectionDirection {
-  NORTH = 'N',
-  NORTHEAST = 'NE',
-  EAST = 'E',
-  SOUTHEAST = 'SE',
-  SOUTH = 'S',
-  SOUTHWEST = 'SW',
-  WEST = 'W',
-  NORTHWEST = 'NW',
+  NORTH = "N",
+  NORTHEAST = "NE",
+  EAST = "E",
+  SOUTHEAST = "SE",
+  SOUTH = "S",
+  SOUTHWEST = "SW",
+  WEST = "W",
+  NORTHWEST = "NW",
 }
 
 // Direction to velocity vector mapping
@@ -76,7 +76,7 @@ function initializeVelocityField(
   );
 }
 
-type AdvectionTextureID = 'velocity';
+type AdvectionTextureID = "velocity";
 
 class AdvectionTestSimulation {
   private resources: WebGPUResources | null = null;
@@ -90,7 +90,7 @@ class AdvectionTestSimulation {
   ) {
     if (!canvasRef.current) {
       throw new WebGPUError(
-        'Could not initialize WebGPU: Canvas not found',
+        "Could not initialize WebGPU: Canvas not found",
         WebGPUErrorCode.NO_CANVAS
       );
     }
@@ -102,10 +102,10 @@ class AdvectionTestSimulation {
     );
 
     // Create velocity texture (ping-pong for advection)
-    this.textureManager.createPingPongTexture('velocity', {
-      label: 'Velocity Texture',
+    this.textureManager.createPingPongTexture("velocity", {
+      label: "Velocity Texture",
       size: [GRID_SIZE, GRID_SIZE],
-      format: 'rg32float',
+      format: "rg32float",
       usage:
         GPUTextureUsage.STORAGE_BINDING |
         GPUTextureUsage.TEXTURE_BINDING |
@@ -114,7 +114,7 @@ class AdvectionTestSimulation {
 
     // Initialize velocity field with test pattern in the specified direction
     initializeVelocityField(
-      this.textureManager.getCurrentTexture('velocity'),
+      this.textureManager.getCurrentTexture("velocity"),
       this.resources.device,
       direction
     );
@@ -124,19 +124,19 @@ class AdvectionTestSimulation {
 
     // Create rendering pass
     const textureShaderModule = this.resources.device.createShaderModule({
-      label: 'Texture Shader',
+      label: "Texture Shader",
       code: textureShader,
     });
     this.renderingPass = new RenderTexturePass(
       {
-        name: 'Advection Test Rendering',
+        name: "Advection Test Rendering",
         vertex: {
           module: textureShaderModule,
-          entryPoint: 'vertex_main',
+          entryPoint: "vertex_main",
         },
         fragment: {
           module: textureShaderModule,
-          entryPoint: 'fragment_main',
+          entryPoint: "fragment_main",
           targets: [
             {
               format: this.resources.canvasFormat,
@@ -159,7 +159,7 @@ class AdvectionTestSimulation {
       !this.renderingPass
     ) {
       throw new WebGPUError(
-        'Could not step advection test: Resources not initialized. Run initialize() first.',
+        "Could not step advection test: Resources not initialized. Run initialize() first.",
         WebGPUErrorCode.NO_RESOURCES
       );
     }
@@ -169,7 +169,7 @@ class AdvectionTestSimulation {
     if (!renderOnly) {
       // Compute Pass - Run Advection
       const advectionPassEncoder = commandEncoder.beginComputePass({
-        label: 'Advection Test Compute Pass',
+        label: "Advection Test Compute Pass",
       });
       this.advectionPass.execute(
         advectionPassEncoder,
@@ -179,17 +179,17 @@ class AdvectionTestSimulation {
       advectionPassEncoder.end();
 
       // Swap textures for next iteration
-      this.textureManager.swap('velocity');
+      this.textureManager.swap("velocity");
     }
 
     // Render Pass - Display velocity field
     const renderPassEncoder = commandEncoder.beginRenderPass({
-      label: 'Advection Test Render Pass',
+      label: "Advection Test Render Pass",
       colorAttachments: [
         {
           view: this.resources.context.getCurrentTexture().createView(),
-          loadOp: 'clear',
-          storeOp: 'store',
+          loadOp: "clear",
+          storeOp: "store",
           clearValue: { r: 0.0, g: 0.0, b: 0.0, a: 0.0 },
         },
       ],
@@ -278,7 +278,7 @@ function AdvectionTestComponent() {
       >
         {Object.values(AdvectionDirection).map((direction) => (
           <option key={direction} value={direction}>
-            {direction} ({DIRECTION_VECTORS[direction].join(', ')})
+            {direction} ({DIRECTION_VECTORS[direction].join(", ")})
           </option>
         ))}
       </select>

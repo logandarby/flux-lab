@@ -1,19 +1,19 @@
-import { useCallback, useRef } from 'react';
-import { useEffect, useState } from 'react';
-import textureShader from './shaders/textureShader.wgsl?raw';
-import divergenceShaderTemplate from './shaders/divergenceShader.wgsl?raw';
-import advectionShaderTemplate from './shaders/advectionShader.wgsl?raw';
-import { ComputePass } from './utils/ComputePass';
+import { useCallback, useRef } from "react";
+import { useEffect, useState } from "react";
+import textureShader from "./shaders/textureShader.wgsl?raw";
+import divergenceShaderTemplate from "./shaders/divergenceShader.wgsl?raw";
+import advectionShaderTemplate from "./shaders/advectionShader.wgsl?raw";
+import { ComputePass } from "./utils/ComputePass";
 import {
   initializeWebGPU,
   injectShaderVariables,
   WebGPUError,
   WebGPUErrorCode,
   type WebGPUResources,
-} from './utils/webgpu.utils';
-import { TextureManager } from './utils/TextureManager';
-import { RenderPass, type RenderPassConfig } from './utils/RenderPass';
-import SimulationControls from './components/ui/SimulationControls';
+} from "./utils/webgpu.utils";
+import { TextureManager } from "./utils/TextureManager";
+import { RenderPass, type RenderPassConfig } from "./utils/RenderPass";
+import SimulationControls from "./components/ui/SimulationControls";
 
 // Constants
 
@@ -27,16 +27,16 @@ const WORKGROUP_COUNT = Math.ceil(GRID_SIZE / WORKGROUP_SIZE);
 
 // Utils
 
-export type SmokeTextureID = 'divergence' | 'velocity';
+export type SmokeTextureID = "divergence" | "velocity";
 
 class DivergencePass extends ComputePass<SmokeTextureID> {
   constructor(device: GPUDevice) {
     super(
       {
-        name: 'divergence',
-        entryPoint: 'compute_main',
+        name: "divergence",
+        entryPoint: "compute_main",
         shader: device.createShaderModule({
-          label: 'Divergence Shader',
+          label: "Divergence Shader",
           code: injectShaderVariables(divergenceShaderTemplate, {
             WORKGROUP_SIZE,
           }),
@@ -48,15 +48,15 @@ class DivergencePass extends ComputePass<SmokeTextureID> {
 
   protected createBindGroupLayout(): GPUBindGroupLayout {
     return this.device.createBindGroupLayout({
-      label: 'Divergence Compute Bind Group Layout',
+      label: "Divergence Compute Bind Group Layout",
       entries: [
         {
           // Velocity In
           binding: 0,
           visibility: GPUShaderStage.COMPUTE,
           texture: {
-            sampleType: 'unfilterable-float',
-            viewDimension: '2d',
+            sampleType: "unfilterable-float",
+            viewDimension: "2d",
           },
         },
         {
@@ -64,9 +64,9 @@ class DivergencePass extends ComputePass<SmokeTextureID> {
           binding: 1,
           visibility: GPUShaderStage.COMPUTE,
           storageTexture: {
-            format: 'r32float',
-            access: 'write-only',
-            viewDimension: '2d',
+            format: "r32float",
+            access: "write-only",
+            viewDimension: "2d",
           },
         },
       ],
@@ -82,11 +82,11 @@ class DivergencePass extends ComputePass<SmokeTextureID> {
       entries: [
         {
           binding: 0,
-          resource: textureManager.getCurrentTexture('velocity').createView(),
+          resource: textureManager.getCurrentTexture("velocity").createView(),
         },
         {
           binding: 1,
-          resource: textureManager.getCurrentTexture('divergence').createView(),
+          resource: textureManager.getCurrentTexture("divergence").createView(),
         },
       ],
     });
@@ -97,10 +97,10 @@ export class AdvectionPass extends ComputePass<SmokeTextureID> {
   constructor(device: GPUDevice) {
     super(
       {
-        name: 'Advection Pass',
-        entryPoint: 'compute_main',
+        name: "Advection Pass",
+        entryPoint: "compute_main",
         shader: device.createShaderModule({
-          label: 'Advection Shader',
+          label: "Advection Shader",
           code: injectShaderVariables(advectionShaderTemplate, {
             WORKGROUP_SIZE,
           }),
@@ -112,15 +112,15 @@ export class AdvectionPass extends ComputePass<SmokeTextureID> {
 
   protected createBindGroupLayout(): GPUBindGroupLayout {
     return this.device.createBindGroupLayout({
-      label: 'Advection Bind Group Layout',
+      label: "Advection Bind Group Layout",
       entries: [
         // Velocity
         {
           binding: 0,
           visibility: GPUShaderStage.COMPUTE,
           texture: {
-            sampleType: 'unfilterable-float',
-            viewDimension: '2d',
+            sampleType: "unfilterable-float",
+            viewDimension: "2d",
           },
         },
         // Advection In
@@ -128,8 +128,8 @@ export class AdvectionPass extends ComputePass<SmokeTextureID> {
           binding: 1,
           visibility: GPUShaderStage.COMPUTE,
           texture: {
-            sampleType: 'unfilterable-float',
-            viewDimension: '2d',
+            sampleType: "unfilterable-float",
+            viewDimension: "2d",
           },
         },
         // Advection Out
@@ -137,9 +137,9 @@ export class AdvectionPass extends ComputePass<SmokeTextureID> {
           binding: 2,
           visibility: GPUShaderStage.COMPUTE,
           storageTexture: {
-            format: 'rg32float',
-            access: 'write-only',
-            viewDimension: '2d',
+            format: "rg32float",
+            access: "write-only",
+            viewDimension: "2d",
           },
         },
       ],
@@ -150,20 +150,20 @@ export class AdvectionPass extends ComputePass<SmokeTextureID> {
     textureManager: TextureManager<SmokeTextureID>
   ): GPUBindGroup {
     return this.device.createBindGroup({
-      label: 'Advection Bind Group',
+      label: "Advection Bind Group",
       layout: this.bindGroupLayout,
       entries: [
         {
           binding: 0,
-          resource: textureManager.getCurrentTexture('velocity').createView(),
+          resource: textureManager.getCurrentTexture("velocity").createView(),
         },
         {
           binding: 1,
-          resource: textureManager.getCurrentTexture('velocity').createView(),
+          resource: textureManager.getCurrentTexture("velocity").createView(),
         },
         {
           binding: 2,
-          resource: textureManager.getBackTexture('velocity').createView(),
+          resource: textureManager.getBackTexture("velocity").createView(),
         },
       ],
     });
@@ -176,20 +176,20 @@ export class RenderTexturePass extends RenderPass<SmokeTextureID> {
   constructor(config: RenderPassConfig, device: GPUDevice) {
     super(config, device);
     this.sampler = this.device.createSampler({
-      label: 'Texture Sampler',
+      label: "Texture Sampler",
     });
   }
 
   protected createBindGroupLayout(): GPUBindGroupLayout {
     return this.device.createBindGroupLayout({
-      label: 'Texture Rendering Bind Group Layout',
+      label: "Texture Rendering Bind Group Layout",
       entries: [
         {
           binding: 0,
           visibility: GPUShaderStage.FRAGMENT,
           texture: {
-            sampleType: 'unfilterable-float',
-            viewDimension: '2d',
+            sampleType: "unfilterable-float",
+            viewDimension: "2d",
             multisampled: false,
           },
         },
@@ -197,7 +197,7 @@ export class RenderTexturePass extends RenderPass<SmokeTextureID> {
           binding: 1,
           visibility: GPUShaderStage.FRAGMENT,
           sampler: {
-            type: 'non-filtering',
+            type: "non-filtering",
           },
         },
       ],
@@ -208,12 +208,12 @@ export class RenderTexturePass extends RenderPass<SmokeTextureID> {
     textureManager: TextureManager<SmokeTextureID>
   ): GPUBindGroup {
     return this.device.createBindGroup({
-      label: 'Smoke Texture Bind Group',
+      label: "Smoke Texture Bind Group",
       layout: this.bindGroupLayout,
       entries: [
         {
           binding: 0,
-          resource: textureManager.getCurrentTexture('velocity').createView(),
+          resource: textureManager.getCurrentTexture("velocity").createView(),
         },
         {
           binding: 1,
@@ -270,7 +270,7 @@ class SmokeSimulation {
   public async initialize(canvasRef: React.RefObject<HTMLCanvasElement>) {
     if (!canvasRef.current) {
       throw new WebGPUError(
-        'Could not initialize WebGPU: Canvas not found',
+        "Could not initialize WebGPU: Canvas not found",
         WebGPUErrorCode.NO_CANVAS
       );
     }
@@ -281,24 +281,24 @@ class SmokeSimulation {
       this.resources.device
     );
 
-    this.textureManager.createPingPongTexture('velocity', {
-      label: 'Velocity Texture',
+    this.textureManager.createPingPongTexture("velocity", {
+      label: "Velocity Texture",
       size: [GRID_SIZE, GRID_SIZE],
-      format: 'rg32float',
+      format: "rg32float",
       usage:
         GPUTextureUsage.STORAGE_BINDING |
         GPUTextureUsage.TEXTURE_BINDING |
         GPUTextureUsage.COPY_DST,
     });
     initializeVelocityField(
-      this.textureManager.getCurrentTexture('velocity'),
+      this.textureManager.getCurrentTexture("velocity"),
       this.resources.device
     );
 
-    this.textureManager.createTexture('divergence', {
-      label: 'Divergence texture',
+    this.textureManager.createTexture("divergence", {
+      label: "Divergence texture",
       size: [GRID_SIZE, GRID_SIZE],
-      format: 'r32float',
+      format: "r32float",
       usage:
         GPUTextureUsage.TEXTURE_BINDING |
         GPUTextureUsage.STORAGE_BINDING |
@@ -308,19 +308,19 @@ class SmokeSimulation {
     this.divergencePass = new DivergencePass(this.resources.device);
     this.advectionPass = new AdvectionPass(this.resources.device);
     const textureShaderModule = this.resources.device.createShaderModule({
-      label: 'Texture Shader',
+      label: "Texture Shader",
       code: textureShader,
     });
     this.renderingPass = new RenderTexturePass(
       {
-        name: 'Texture Rendering',
+        name: "Texture Rendering",
         vertex: {
           module: textureShaderModule,
-          entryPoint: 'vertex_main',
+          entryPoint: "vertex_main",
         },
         fragment: {
           module: textureShaderModule,
-          entryPoint: 'fragment_main',
+          entryPoint: "fragment_main",
           targets: [
             {
               format: this.resources.canvasFormat,
@@ -343,7 +343,7 @@ class SmokeSimulation {
       !this.renderingPass
     ) {
       throw new WebGPUError(
-        'Could not step simulation: Resources not initialized. Run initialize() first.',
+        "Could not step simulation: Resources not initialized. Run initialize() first.",
         WebGPUErrorCode.NO_RESOURCES
       );
     }
@@ -355,7 +355,7 @@ class SmokeSimulation {
     if (!renderOnly) {
       // Compute Pass (Advection)
       const advectionPassEncoder = commandEncoder.beginComputePass({
-        label: 'Advection Compute pass',
+        label: "Advection Compute pass",
       });
       this.advectionPass.execute(
         advectionPassEncoder,
@@ -363,17 +363,17 @@ class SmokeSimulation {
         WORKGROUP_COUNT
       );
       advectionPassEncoder.end();
-      this.textureManager.swap('velocity');
+      this.textureManager.swap("velocity");
     }
 
     // Render Pass
     const renderPassEncoder = commandEncoder.beginRenderPass({
-      label: 'Texture Render Pass',
+      label: "Texture Render Pass",
       colorAttachments: [
         {
           view: this.resources.context.getCurrentTexture().createView(),
-          loadOp: 'clear',
-          storeOp: 'store',
+          loadOp: "clear",
+          storeOp: "store",
           clearValue: { r: 0.0, g: 0.0, b: 0.0, a: 0.0 },
         },
       ],
@@ -405,17 +405,17 @@ function SmokeSimulationComponent() {
       if (!canvasRef.current || !!smokeSimulation.current) {
         return;
       }
-      console.log('Initializing Smoke Simulation');
+      console.log("Initializing Smoke Simulation");
       smokeSimulation.current = new SmokeSimulation();
       try {
         await smokeSimulation.current.initialize(canvasRef);
         setIsInitialized(true);
         setInitError(null);
       } catch (error) {
-        console.error('Failed to initialize smoke simulation:', error);
+        console.error("Failed to initialize smoke simulation:", error);
         smokeSimulation.current = null;
         setIsInitialized(false);
-        setInitError(error instanceof Error ? error.message : 'Unknown error');
+        setInitError(error instanceof Error ? error.message : "Unknown error");
       }
     };
     runSimulation();
@@ -433,7 +433,7 @@ function SmokeSimulationComponent() {
           smokeSimulation.current.step();
           animationFrameRef.current = requestAnimationFrame(animate);
         } catch (error) {
-          console.error('Failed to step simulation:', error);
+          console.error("Failed to step simulation:", error);
           setIsPlaying(false);
         }
       }
@@ -454,7 +454,7 @@ function SmokeSimulationComponent() {
       try {
         smokeSimulation.current.step();
       } catch (error) {
-        console.error('Failed to step simulation:', error);
+        console.error("Failed to step simulation:", error);
       }
     }
   }, [isInitialized]);
@@ -470,7 +470,7 @@ function SmokeSimulationComponent() {
         await smokeSimulation.current.initialize(canvasRef);
       }
     } catch (error) {
-      console.error('Failed to restart simulation:', error);
+      console.error("Failed to restart simulation:", error);
     }
   }, [isInitialized]);
 

@@ -47,7 +47,7 @@ export class TextureManager<TextureID extends string | number> {
     if (!textures) {
       throw new Error(`Texture '${name}' not found`);
     }
-    if (!('back' in textures)) {
+    if (!("back" in textures)) {
       throw new Error(`Cannot swap static single texture ${name}`);
     }
     const { front, back } = textures;
@@ -70,7 +70,7 @@ export class TextureManager<TextureID extends string | number> {
     if (!backTexture) {
       throw new Error(`Texture ${name} does not exist`);
     }
-    if (!('back' in backTexture)) {
+    if (!("back" in backTexture)) {
       throw new Error(
         `Texture ${name} is not a ping-pong texture-- it has no back buffer, only a front`
       );

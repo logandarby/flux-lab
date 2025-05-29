@@ -1,4 +1,4 @@
-import type { TextureManager } from '@/SmokeSimulation';
+import type { TextureManager } from "@/SmokeSimulation";
 
 export interface RenderPassConfig {
   name: string;
