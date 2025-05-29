@@ -9,6 +9,7 @@ import {
 import SmokeSimulationComponent from "./SmokeSimulation";
 import TestsPage from "./pages/TestsPage";
 import AdvectionTestComponent from "./components/tests/AdvectionTestComponent";
+import DiffusionTestComponent from "./components/tests/DiffusionTestComponent";
 
 // Root route
 const rootRoute = createRootRoute({
@@ -41,6 +42,8 @@ function TestComponent() {
   switch (testId) {
     case "advection":
       return <AdvectionTestComponent />;
+    case "diffusion":
+      return <DiffusionTestComponent />;
     default:
       return (
         <div className="p-8 text-center">

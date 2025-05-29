@@ -1,12 +1,8 @@
 import { useCallback, useRef } from "react";
 import { useEffect, useState } from "react";
 import textureShader from "./shaders/textureShader.wgsl?raw";
-import divergenceShaderTemplate from "./shaders/divergenceShader.wgsl?raw";
-import advectionShaderTemplate from "./shaders/advectionShader.wgsl?raw";
-import { ComputePass } from "./utils/ComputePass";
 import {
   initializeWebGPU,
-  injectShaderVariables,
   WebGPUError,
   WebGPUErrorCode,
   type WebGPUResources,
@@ -14,161 +10,29 @@ import {
 import { TextureManager } from "./utils/TextureManager";
 import { RenderPass, type RenderPassConfig } from "./utils/RenderPass";
 import SimulationControls from "./components/ui/SimulationControls";
+import {
+  SimulationPassFactory,
+  UniformBufferUtils,
+  type AdvectionPass,
+  type DiffusionPass,
+  type DivergencePass,
+  type PressurePass,
+  type GradientSubtractionPass,
+} from "./passes/SimulationPasses";
 
 // Constants
 
 const CANVAS_WIDTH = 512;
 const CANVAS_HEIGHT = 512;
-const GRID_SIZE = 16; // 8x8 grid
-// const FLOAT_BYTES = 4;
+const GRID_SIZE = 16; // 16x16 grid
 const WORKGROUP_SIZE = 8;
 const WORKGROUP_COUNT = Math.ceil(GRID_SIZE / WORKGROUP_SIZE);
-// const SIMULATION_TIME_STEP_MS = 1000 / 60;
+const VISCOSITY = 0.01;
+const TIMESTEP = 1.0 / 30.0;
 
 // Utils
 
-export type SmokeTextureID = "divergence" | "velocity";
-
-class DivergencePass extends ComputePass<SmokeTextureID> {
-  constructor(device: GPUDevice) {
-    super(
-      {
-        name: "divergence",
-        entryPoint: "compute_main",
-        shader: device.createShaderModule({
-          label: "Divergence Shader",
-          code: injectShaderVariables(divergenceShaderTemplate, {
-            WORKGROUP_SIZE,
-          }),
-        }),
-      },
-      device
-    );
-  }
-
-  protected createBindGroupLayout(): GPUBindGroupLayout {
-    return this.device.createBindGroupLayout({
-      label: "Divergence Compute Bind Group Layout",
-      entries: [
-        {
-          // Velocity In
-          binding: 0,
-          visibility: GPUShaderStage.COMPUTE,
-          texture: {
-            sampleType: "unfilterable-float",
-            viewDimension: "2d",
-          },
-        },
-        {
-          // Divergence Out
-          binding: 1,
-          visibility: GPUShaderStage.COMPUTE,
-          storageTexture: {
-            format: "r32float",
-            access: "write-only",
-            viewDimension: "2d",
-          },
-        },
-      ],
-    });
-  }
-
-  protected createBindGroup(
-    textureManager: TextureManager<SmokeTextureID>
-  ): GPUBindGroup {
-    return this.device.createBindGroup({
-      label: `${this.config.name} BindGroup`,
-      layout: this.bindGroupLayout,
-      entries: [
-        {
-          binding: 0,
-          resource: textureManager.getCurrentTexture("velocity").createView(),
-        },
-        {
-          binding: 1,
-          resource: textureManager.getCurrentTexture("divergence").createView(),
-        },
-      ],
-    });
-  }
-}
-
-export class AdvectionPass extends ComputePass<SmokeTextureID> {
-  constructor(device: GPUDevice) {
-    super(
-      {
-        name: "Advection Pass",
-        entryPoint: "compute_main",
-        shader: device.createShaderModule({
-          label: "Advection Shader",
-          code: injectShaderVariables(advectionShaderTemplate, {
-            WORKGROUP_SIZE,
-          }),
-        }),
-      },
-      device
-    );
-  }
-
-  protected createBindGroupLayout(): GPUBindGroupLayout {
-    return this.device.createBindGroupLayout({
-      label: "Advection Bind Group Layout",
-      entries: [
-        // Velocity
-        {
-          binding: 0,
-          visibility: GPUShaderStage.COMPUTE,
-          texture: {
-            sampleType: "unfilterable-float",
-            viewDimension: "2d",
-          },
-        },
-        // Advection In
-        {
-          binding: 1,
-          visibility: GPUShaderStage.COMPUTE,
-          texture: {
-            sampleType: "unfilterable-float",
-            viewDimension: "2d",
-          },
-        },
-        // Advection Out
-        {
-          binding: 2,
-          visibility: GPUShaderStage.COMPUTE,
-          storageTexture: {
-            format: "rg32float",
-            access: "write-only",
-            viewDimension: "2d",
-          },
-        },
-      ],
-    });
-  }
-
-  protected createBindGroup(
-    textureManager: TextureManager<SmokeTextureID>
-  ): GPUBindGroup {
-    return this.device.createBindGroup({
-      label: "Advection Bind Group",
-      layout: this.bindGroupLayout,
-      entries: [
-        {
-          binding: 0,
-          resource: textureManager.getCurrentTexture("velocity").createView(),
-        },
-        {
-          binding: 1,
-          resource: textureManager.getCurrentTexture("velocity").createView(),
-        },
-        {
-          binding: 2,
-          resource: textureManager.getBackTexture("velocity").createView(),
-        },
-      ],
-    });
-  }
-}
+export type SmokeTextureID = "divergence" | "velocity" | "pressure";
 
 export class RenderTexturePass extends RenderPass<SmokeTextureID> {
   private readonly sampler: GPUSampler;
@@ -262,9 +126,11 @@ function initializeVelocityField(
 class SmokeSimulation {
   private resources: WebGPUResources | null = null;
   private textureManager: TextureManager<SmokeTextureID> | null = null;
-  // @ts-expect-error TODO: Will be implemented eventually
-  private divergencePass: DivergencePass | null = null;
   private advectionPass: AdvectionPass | null = null;
+  private diffusionPass: DiffusionPass | null = null;
+  private divergencePass: DivergencePass | null = null;
+  private pressurePass: PressurePass | null = null;
+  private gradientSubtractionPass: GradientSubtractionPass | null = null;
   private renderingPass: RenderTexturePass | null = null;
 
   public async initialize(canvasRef: React.RefObject<HTMLCanvasElement>) {
@@ -281,6 +147,7 @@ class SmokeSimulation {
       this.resources.device
     );
 
+    // Create velocity texture (ping-pong)
     this.textureManager.createPingPongTexture("velocity", {
       label: "Velocity Texture",
       size: [GRID_SIZE, GRID_SIZE],
@@ -295,6 +162,7 @@ class SmokeSimulation {
       this.resources.device
     );
 
+    // Create divergence texture
     this.textureManager.createTexture("divergence", {
       label: "Divergence texture",
       size: [GRID_SIZE, GRID_SIZE],
@@ -305,8 +173,41 @@ class SmokeSimulation {
         GPUTextureUsage.COPY_DST,
     });
 
-    this.divergencePass = new DivergencePass(this.resources.device);
-    this.advectionPass = new AdvectionPass(this.resources.device);
+    // Create pressure texture (ping-pong)
+    this.textureManager.createPingPongTexture("pressure", {
+      label: "Pressure Texture",
+      size: [GRID_SIZE, GRID_SIZE],
+      format: "r32float",
+      usage:
+        GPUTextureUsage.STORAGE_BINDING |
+        GPUTextureUsage.TEXTURE_BINDING |
+        GPUTextureUsage.COPY_DST,
+    });
+
+    // Initialize simulation passes
+    this.advectionPass = SimulationPassFactory.createAdvectionPass(
+      this.resources.device,
+      WORKGROUP_SIZE
+    );
+    this.diffusionPass = SimulationPassFactory.createDiffusionPass(
+      this.resources.device,
+      WORKGROUP_SIZE
+    );
+    this.divergencePass = SimulationPassFactory.createDivergencePass(
+      this.resources.device,
+      WORKGROUP_SIZE
+    );
+    this.pressurePass = SimulationPassFactory.createPressurePass(
+      this.resources.device,
+      WORKGROUP_SIZE
+    );
+    this.gradientSubtractionPass =
+      SimulationPassFactory.createGradientSubtractionPass(
+        this.resources.device,
+        WORKGROUP_SIZE
+      );
+
+    // Create rendering pass
     const textureShaderModule = this.resources.device.createShaderModule({
       label: "Texture Shader",
       code: textureShader,
@@ -335,11 +236,17 @@ class SmokeSimulation {
     this.step({ renderOnly: true });
   }
 
-  public step({ renderOnly }: { renderOnly: boolean } = { renderOnly: false }) {
+  public async step(
+    { renderOnly }: { renderOnly: boolean } = { renderOnly: false }
+  ) {
     if (
       !this.resources ||
       !this.textureManager ||
       !this.advectionPass ||
+      !this.diffusionPass ||
+      !this.divergencePass ||
+      !this.pressurePass ||
+      !this.gradientSubtractionPass ||
       !this.renderingPass
     ) {
       throw new WebGPUError(
@@ -350,19 +257,118 @@ class SmokeSimulation {
 
     const commandEncoder = this.resources.device.createCommandEncoder();
 
-    // if (true) {
-    // TODO: Put back
     if (!renderOnly) {
-      // Compute Pass (Advection)
+      // Step 1: Advection
+      const advectionUniforms = UniformBufferUtils.createAdvectionUniforms(
+        TIMESTEP,
+        GRID_SIZE
+      );
+      const advectionBuffer = this.createUniformBuffer(
+        advectionUniforms,
+        "Advection"
+      );
+
       const advectionPassEncoder = commandEncoder.beginComputePass({
-        label: "Advection Compute pass",
+        label: "Advection Compute Pass",
       });
-      this.advectionPass.execute(
+      await this.advectionPass.execute(
         advectionPassEncoder,
-        this.textureManager,
+        {
+          textureManager: this.textureManager,
+          uniformBuffer: advectionBuffer,
+        },
         WORKGROUP_COUNT
       );
       advectionPassEncoder.end();
+      this.textureManager.swap("velocity");
+
+      // Step 2: Diffusion
+      const diffusionUniforms = UniformBufferUtils.createDiffusionUniforms(
+        TIMESTEP,
+        GRID_SIZE,
+        VISCOSITY
+      );
+      const diffusionBuffer = this.createUniformBuffer(
+        diffusionUniforms,
+        "Diffusion"
+      );
+
+      const diffusionPassEncoder = commandEncoder.beginComputePass({
+        label: "Diffusion Compute Pass",
+      });
+      await this.diffusionPass.execute(
+        diffusionPassEncoder,
+        {
+          textureManager: this.textureManager,
+          uniformBuffer: diffusionBuffer,
+        },
+        WORKGROUP_COUNT
+      );
+      diffusionPassEncoder.end();
+      // Note: Diffusion pass handles its own texture swapping
+
+      // Step 3: Divergence
+      const divergenceUniforms =
+        UniformBufferUtils.createDivergenceUniforms(GRID_SIZE);
+      const divergenceBuffer = this.createUniformBuffer(
+        divergenceUniforms,
+        "Divergence"
+      );
+
+      const divergencePassEncoder = commandEncoder.beginComputePass({
+        label: "Divergence Compute Pass",
+      });
+      await this.divergencePass.execute(
+        divergencePassEncoder,
+        {
+          textureManager: this.textureManager,
+          uniformBuffer: divergenceBuffer,
+        },
+        WORKGROUP_COUNT
+      );
+      divergencePassEncoder.end();
+
+      // Step 4: Pressure Projection
+      const pressureUniforms = UniformBufferUtils.createPressureUniforms();
+      const pressureBuffer = this.createUniformBuffer(
+        pressureUniforms,
+        "Pressure"
+      );
+
+      const pressurePassEncoder = commandEncoder.beginComputePass({
+        label: "Pressure Compute Pass",
+      });
+      await this.pressurePass.execute(
+        pressurePassEncoder,
+        {
+          textureManager: this.textureManager,
+          uniformBuffer: pressureBuffer,
+        },
+        WORKGROUP_COUNT
+      );
+      pressurePassEncoder.end();
+      // Note: Pressure pass handles its own texture swapping
+
+      // Step 5: Gradient Subtraction
+      const gradientUniforms =
+        UniformBufferUtils.createGradientSubtractionUniforms(GRID_SIZE);
+      const gradientBuffer = this.createUniformBuffer(
+        gradientUniforms,
+        "Gradient"
+      );
+
+      const gradientPassEncoder = commandEncoder.beginComputePass({
+        label: "Gradient Subtraction Compute Pass",
+      });
+      await this.gradientSubtractionPass.execute(
+        gradientPassEncoder,
+        {
+          textureManager: this.textureManager,
+          uniformBuffer: gradientBuffer,
+        },
+        WORKGROUP_COUNT
+      );
+      gradientPassEncoder.end();
       this.textureManager.swap("velocity");
     }
 
@@ -389,6 +395,16 @@ class SmokeSimulation {
 
     renderPassEncoder.end();
     this.resources.device.queue.submit([commandEncoder.finish()]);
+  }
+
+  private createUniformBuffer(data: Float32Array, label: string): GPUBuffer {
+    const buffer = this.resources!.device.createBuffer({
+      label: `${label} Uniform Buffer`,
+      size: data.byteLength,
+      usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+    });
+    this.resources!.device.queue.writeBuffer(buffer, 0, data);
+    return buffer;
   }
 }
 

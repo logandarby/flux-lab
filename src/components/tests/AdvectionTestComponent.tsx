@@ -7,8 +7,11 @@ import {
   WebGPUError,
   WebGPUErrorCode,
   initializeWebGPU,
+  injectShaderVariables,
 } from "@/utils/webgpu.utils";
-import { AdvectionPass, RenderTexturePass } from "@/SmokeSimulation";
+import { RenderTexturePass, type SmokeTextureID } from "@/SmokeSimulation";
+import { ComputePass, type BindGroupArgs } from "@/utils/ComputePass";
+import advectionShaderTemplate from "../../shaders/advectionShader.wgsl?raw";
 
 const GRID_SIZE = 16; // 8x8 grid
 const WORKGROUP_SIZE = 8;
@@ -77,6 +80,111 @@ function initializeVelocityField(
 }
 
 type AdvectionTextureID = "velocity";
+
+export class AdvectionPass extends ComputePass<SmokeTextureID> {
+  constructor(device: GPUDevice) {
+    super(
+      {
+        name: "Advection Pass",
+        entryPoint: "compute_main",
+        shader: device.createShaderModule({
+          label: "Advection Shader",
+          code: injectShaderVariables(advectionShaderTemplate, {
+            WORKGROUP_SIZE,
+          }),
+        }),
+      },
+      device
+    );
+  }
+
+  protected createBindGroupLayout(): GPUBindGroupLayout {
+    return this.device.createBindGroupLayout({
+      label: "Advection Bind Group Layout",
+      entries: [
+        // Velocity
+        {
+          binding: 0,
+          visibility: GPUShaderStage.COMPUTE,
+          texture: {
+            sampleType: "unfilterable-float",
+            viewDimension: "2d",
+          },
+        },
+        // Advection In
+        {
+          binding: 1,
+          visibility: GPUShaderStage.COMPUTE,
+          texture: {
+            sampleType: "unfilterable-float",
+            viewDimension: "2d",
+          },
+        },
+        // Advection Out
+        {
+          binding: 2,
+          visibility: GPUShaderStage.COMPUTE,
+          storageTexture: {
+            format: "rg32float",
+            access: "write-only",
+            viewDimension: "2d",
+          },
+        },
+        // Uniform Input Buffer
+        {
+          binding: 3,
+          visibility: GPUShaderStage.COMPUTE,
+          buffer: {
+            type: "uniform",
+          },
+        },
+      ],
+    });
+  }
+
+  protected createBindGroup(args: BindGroupArgs<SmokeTextureID>): GPUBindGroup {
+    if (!args.textureManager) {
+      throw new Error("No texture manager supplied");
+    }
+    if (!args.uniformBuffer) {
+      throw new Error("No uniform buffer supplied");
+    }
+    // const uniformBuffer = this.device.createBuffer({
+    //   label: `${this.config.name} Uniform Buffer`,
+    //   usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+    //   size: args.uniformValues.byteLength,
+    // });
+    // this.device.queue.writeBuffer(uniformBuffer, 0, args.uniformValues);
+    return this.device.createBindGroup({
+      label: "Advection Bind Group",
+      layout: this.bindGroupLayout,
+      entries: [
+        {
+          binding: 0,
+          resource: args.textureManager
+            .getCurrentTexture("velocity")
+            .createView(),
+        },
+        {
+          binding: 1,
+          resource: args.textureManager
+            .getCurrentTexture("velocity")
+            .createView(),
+        },
+        {
+          binding: 2,
+          resource: args.textureManager.getBackTexture("velocity").createView(),
+        },
+        {
+          binding: 3,
+          resource: {
+            buffer: args.uniformBuffer,
+          },
+        },
+      ],
+    });
+  }
+}
 
 class AdvectionTestSimulation {
   private resources: WebGPUResources | null = null;
@@ -167,13 +275,28 @@ class AdvectionTestSimulation {
     const commandEncoder = this.resources.device.createCommandEncoder();
 
     if (!renderOnly) {
+      // Create uniform values for the advection pass
+      const uniformValues = new Float32Array([
+        1.0 / 30.0, // timestep
+        1.0, // rdx
+      ]);
+      const uniformBuffer = this.resources.device.createBuffer({
+        label: "Advection UBO",
+        size: uniformValues.byteLength,
+        usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+      });
+      this.resources.device.queue.writeBuffer(uniformBuffer, 0, uniformValues);
+
       // Compute Pass - Run Advection
       const advectionPassEncoder = commandEncoder.beginComputePass({
         label: "Advection Test Compute Pass",
       });
       this.advectionPass.execute(
         advectionPassEncoder,
-        this.textureManager,
+        {
+          uniformBuffer,
+          textureManager: this.textureManager,
+        },
         WORKGROUP_COUNT
       );
       advectionPassEncoder.end();

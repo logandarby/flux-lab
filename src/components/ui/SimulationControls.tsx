@@ -104,9 +104,17 @@ function SimulationControls({
           }
           break;
         case "KeyR":
-          event.preventDefault();
-          if (isInitialized && onRestart) {
-            handleRestart();
+          // Only handle restart if no modifier keys are pressed (allow Ctrl+R for refresh)
+          if (
+            !event.ctrlKey &&
+            !event.metaKey &&
+            !event.altKey &&
+            !event.shiftKey
+          ) {
+            event.preventDefault();
+            if (isInitialized && onRestart) {
+              handleRestart();
+            }
           }
           break;
         case "KeyS":

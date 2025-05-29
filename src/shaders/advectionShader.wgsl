@@ -1,13 +1,15 @@
 // Advect the velocities in the texture
 
+struct AdvectionInput {
+    timestep: f32,   // delta time
+    rdx: f32,        // 1 / the grid scale
+};
+
 @group(0) @binding(0) var velocity: texture_2d<f32>;
 @group(0) @binding(1) var advection_in: texture_2d<f32>;
 @group(0) @binding(2) var advection_out: texture_storage_2d<rg32float, write>;
+@group(0) @binding(3) var<uniform> input: AdvectionInput;
 
-struct AdvectionInput {
-    @location(0) timestep: f32,   // delta time
-    @location(1) rdx: f32,        // 1 / the grid scale
-};
 
 // Manual bilinear interpolation function
 fn bilinear_interpolate(texture: texture_2d<f32>, coord: vec2<f32>) -> vec2<f32> {
@@ -45,12 +47,6 @@ fn bilinear_interpolate(texture: texture_2d<f32>, coord: vec2<f32>) -> vec2<f32>
 fn compute_main(
     @builtin(global_invocation_id) texture_coord: vec3<u32>,
 ) {
-    // // TODO: Temporary
-    var input: AdvectionInput;
-    input.timestep = 1.0/10.0;
-    input.rdx = 1;
-    //
-
     let coord = vec2<i32>(texture_coord.xy);
     let texture_size = vec2<i32>(textureDimensions(velocity));
     // if (coord.x >= texture_size.x || coord.y >= texture_size.y) {

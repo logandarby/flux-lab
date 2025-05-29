@@ -26,6 +26,13 @@ const tests: TestInfo[] = [
     status: "stable",
   },
   {
+    id: "diffusion",
+    title: "Diffusion Test",
+    description:
+      "Tests fluid property diffusion using compute shaders with texture ping-ponging.",
+    status: "stable",
+  },
+  {
     id: "divergence",
     title: "Divergence Test",
     description:

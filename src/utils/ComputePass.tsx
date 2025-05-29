@@ -6,17 +6,30 @@ export interface ComputePassConfig {
   readonly entryPoint: string;
 }
 
+export interface BindGroupArgs<TID extends string | number> {
+  textureManager?: TextureManager<TID>;
+  uniformBuffer?: GPUBuffer;
+}
+
 export abstract class ComputePass<TextureID extends string | number> {
-  protected readonly pipeline: GPUComputePipeline;
-  protected readonly bindGroupLayout: GPUBindGroupLayout;
+  protected pipeline!: GPUComputePipeline;
+  protected bindGroupLayout!: GPUBindGroupLayout;
+  private initialized = false;
 
   constructor(
     protected readonly config: ComputePassConfig,
     protected readonly device: GPUDevice
   ) {
+    this.initializePipeline();
+  }
+
+  private async initializePipeline(): Promise<void> {
+    // Delay pipeline setup to allow derived classes to initialize
+    await Promise.resolve(); // Wait for next microtask
     const { pipeline, bindGroupLayout } = this.setupPipeline();
     this.pipeline = pipeline;
     this.bindGroupLayout = bindGroupLayout;
+    this.initialized = true;
   }
 
   private setupPipeline(): {
@@ -39,15 +52,19 @@ export abstract class ComputePass<TextureID extends string | number> {
 
   protected abstract createBindGroupLayout(): GPUBindGroupLayout;
   protected abstract createBindGroup(
-    textureManager: TextureManager<TextureID>
+    bindGroupArgs: BindGroupArgs<TextureID>
   ): GPUBindGroup;
 
-  public execute(
+  public async execute(
     pass: GPUComputePassEncoder,
-    textureManager: TextureManager<TextureID>,
+    bindGroupArgs: BindGroupArgs<TextureID>,
     workgroupCount: number
-  ): void {
-    const bindGroup = this.createBindGroup(textureManager);
+  ): Promise<void> {
+    if (!this.initialized) {
+      await this.initializePipeline();
+    }
+
+    const bindGroup = this.createBindGroup(bindGroupArgs);
 
     pass.setPipeline(this.pipeline);
     pass.setBindGroup(0, bindGroup);

@@ -40,6 +40,17 @@
 
 - For better poisson eq solvers, see Bolz et al. 2003, Goodnight et al. 2003, and Krüger and Westermann 2003.
 
+Process
+
+```
+// Apply the first 3 operators in Equation 12.
+u = advect(u);
+u = diffuse(u);
+u = addForces(u); // Now apply the projection operator to the result.
+p = computePressure(u);
+u = subtractPressureGradient(u, p);
+```
+
 ## Notes
 
 - Maybe not just smoke, but water, fire, air, earth
