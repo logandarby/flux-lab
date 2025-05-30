@@ -54,6 +54,17 @@ export abstract class ComputePass<TextureID extends string | number> {
     bindGroupArgs: BindGroupArgs<TextureID>
   ): GPUBindGroup;
 
+  protected validateArgs(
+    args: BindGroupArgs<TextureID>,
+    required: (keyof BindGroupArgs<TextureID>)[]
+  ): void {
+    for (const key of required) {
+      if (!args[key]) {
+        throw new Error(`${key} is required for ${this.config.name}`);
+      }
+    }
+  }
+
   public execute(
     pass: GPUComputePassEncoder,
     bindGroupArgs: BindGroupArgs<TextureID>,

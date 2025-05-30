@@ -64,10 +64,16 @@ fn shadePressure(value: f32, input: VertexOutput) -> vec4f {
     }
 }
 
+fn shadeDensity(value: f32, input: VertexOutput) -> vec4f {
+    // Smoke Density
+    let purple = vec4f(172, 247, 242, 256) / 256.0;
+    let blue = vec4f(198, 135, 255, 256) / 256.0;
+    return vec4f(mix(purple, blue, vec4f(value)).xyz * value, value);
+}
+
 @fragment
 fn fragment_main(input: VertexOutput) -> @location(0)vec4f {
-    let DAMP: f32 = 2;
-    let value = textureSample(texture, textureSampler, input.texCoord) / DAMP;
+    let value = textureSample(texture, textureSampler, input.texCoord);
 
     switch uniformInput.shaderMode {
         case 0: {
@@ -75,6 +81,9 @@ fn fragment_main(input: VertexOutput) -> @location(0)vec4f {
         }
         case 1: {
             return shadePressure(value.x, input);
+        }
+        case 2: {
+            return shadeDensity(value.x, input);
         }
         default: {
             return vec4(1, 1, 1, 1);

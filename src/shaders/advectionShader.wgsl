@@ -7,7 +7,7 @@ struct AdvectionInput {
 
 @group(0) @binding(0) var velocity: texture_2d<f32>;
 @group(0) @binding(1) var advection_in: texture_2d<f32>;
-@group(0) @binding(2) var advection_out: texture_storage_2d<rg32float, write>;
+@group(0) @binding(2) var advection_out: texture_storage_2d<${OUT_FORMAT}, write>;
 @group(0) @binding(3) var<uniform> input: AdvectionInput;
 
 

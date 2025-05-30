@@ -11,65 +11,129 @@ import { TextureManager } from "./utils/TextureManager";
 import { RenderPass, ShaderMode } from "./utils/RenderPass";
 import SimulationControls from "./components/ui/SimulationControls";
 import {
-  AdvectionPass,
+  VelocityAdvectionPass,
   DiffusionPass,
   DivergencePass,
   GradientSubtractionPass,
   PressurePass,
   UniformBufferUtils,
+  SmokeAdvectionPasss,
+  SmokeDiffusionPass,
 } from "./passes/SimulationPasses";
 
 // Constants
 
 const CANVAS_WIDTH = 2 ** 9;
 const CANVAS_HEIGHT = CANVAS_WIDTH;
-const GRID_SIZE = 2 ** 9; // 16x16 grid
+const GRID_SIZE = {
+  width: 2 ** 9,
+  height: 2 ** 9,
+};
 const GRID_SCALE = 3;
 const WORKGROUP_SIZE = 16;
-const WORKGROUP_COUNT = Math.ceil(GRID_SIZE / WORKGROUP_SIZE);
+const WORKGROUP_COUNT = Math.ceil(GRID_SIZE.width / WORKGROUP_SIZE);
 // const VISCOSITY = 1;
-const DIFFUSION_FACTOR = 0.1; // Smaller = slower diffusion
+
+const DIFFUSION_FACTOR = 10; // Smaller = slower diffusion
 const VELOCITY_ADVECTION = 10; // Smaller = slower velocity advection
+const SMOKE_ADVECTION = 10;
+const SMOKE_DIFFUSION = 10;
+
 const TIMESTEP = 1.0 / 30.0;
 const DIFFUSION_ITERATIONS = 20;
 const PRESSURE_ITERATIONS = 100;
+const SMOKE_PARTICLE_DIMENSIONS = {
+  width: GRID_SIZE.width,
+  height: GRID_SIZE.height,
+}; // TODO: Want this to work with arbitrary particle dimensions with advection
 
-const INIT_VELOCITY = [-10, -10]; // TEMP
+const INIT_VELOCITY = [-20, -20]; // TEMP
 const INIT_VELOCITY_SQUARE_SIZE = 2 ** 6;
 
 // Utils
 
-export type SmokeTextureID = "divergence" | "velocity" | "pressure";
+export type SmokeTextureID =
+  | "divergence"
+  | "velocity"
+  | "pressure"
+  | "smokeDensity"
+  | "smokeParticlePosition";
 
 function initializeTextures(
   textureManager: TextureManager<SmokeTextureID>,
   device: GPUDevice
 ): void {
+  // Init Velocity
   const velocityTexture = textureManager.getCurrentTexture("velocity");
   // prettier-ignore
-  const velocityData = Array(GRID_SIZE * GRID_SIZE).fill([0.0, 0.0]);
-  const x = GRID_SIZE / 2;
-  const y = GRID_SIZE / 2;
+  const velocityData = Array(GRID_SIZE.width * GRID_SIZE.height).fill([0.0, 0.0]);
+  const x = GRID_SIZE.width / 2;
+  const y = GRID_SIZE.height / 2;
   const size = INIT_VELOCITY_SQUARE_SIZE;
   for (let i = 0; i < size; i++) {
     for (let j = 0; j < size; j++) {
-      velocityData[x + i + GRID_SIZE * (y + j)] = INIT_VELOCITY;
+      velocityData[x + i + GRID_SIZE.width * (y + j)] = INIT_VELOCITY;
     }
   }
   device.queue.writeTexture(
     { texture: velocityTexture },
     new Float32Array(velocityData.flat()),
     {
-      bytesPerRow: GRID_SIZE * 2 * 4, // 2 channels × 4 bytes per 32-bit float
+      bytesPerRow: GRID_SIZE.width * 2 * 4, // 2 channels × 4 bytes per 32-bit float
     },
-    { width: GRID_SIZE, height: GRID_SIZE }
+    { ...GRID_SIZE }
+  );
+
+  // Init smoke density texture
+  const smokeDensityTexture = textureManager.getCurrentTexture("smokeDensity");
+  const initSmokeDensityData = Array(GRID_SIZE.width * GRID_SIZE.height).fill(
+    0
+  );
+  for (let i = 0; i < size; i++) {
+    for (let j = 0; j < size; j++) {
+      initSmokeDensityData[x + i + GRID_SIZE.width * (y + j)] = 1;
+    }
+  }
+  device.queue.writeTexture(
+    { texture: smokeDensityTexture },
+    new Float32Array(initSmokeDensityData),
+    {
+      bytesPerRow: GRID_SIZE.width * 4,
+    },
+    { ...GRID_SIZE }
+  );
+
+  // Init Smoke particle locations
+  const smokeParticlePositionsTexture = textureManager.getCurrentTexture(
+    "smokeParticlePosition"
+  );
+  const initSmokePositionsData = Array(
+    SMOKE_PARTICLE_DIMENSIONS.width * SMOKE_PARTICLE_DIMENSIONS.height
+  ).fill([0, 0]);
+  for (let x = 0; x < SMOKE_PARTICLE_DIMENSIONS.width; x++) {
+    for (let y = 0; y < SMOKE_PARTICLE_DIMENSIONS.height; y++) {
+      initSmokePositionsData[x + y * SMOKE_PARTICLE_DIMENSIONS.width] = [
+        (x / SMOKE_PARTICLE_DIMENSIONS.width) * GRID_SIZE.width,
+        (y / SMOKE_PARTICLE_DIMENSIONS.height) * GRID_SIZE.height,
+      ];
+    }
+  }
+  device.queue.writeTexture(
+    { texture: smokeParticlePositionsTexture },
+    new Float32Array(initSmokePositionsData.flat()),
+    {
+      bytesPerRow: SMOKE_PARTICLE_DIMENSIONS.width * 4 * 2,
+    },
+    { ...SMOKE_PARTICLE_DIMENSIONS }
   );
 }
 
 class SmokeSimulation {
   private resources: WebGPUResources | null = null;
   private textureManager: TextureManager<SmokeTextureID> | null = null;
-  private advectionPass: AdvectionPass | null = null;
+  private advectionPass: VelocityAdvectionPass | null = null;
+  private smokeAdvectionPass: SmokeAdvectionPasss | null = null;
+  private smokeDiffusionPass: SmokeDiffusionPass | null = null;
   private diffusionPass: DiffusionPass | null = null;
   private divergencePass: DivergencePass | null = null;
   private pressurePass: PressurePass | null = null;
@@ -98,19 +162,18 @@ class SmokeSimulation {
     // Create velocity texture (ping-pong)
     this.textureManager.createPingPongTexture("velocity", {
       label: "Velocity Texture",
-      size: [GRID_SIZE, GRID_SIZE],
+      size: GRID_SIZE,
       format: "rg32float",
       usage:
         GPUTextureUsage.STORAGE_BINDING |
         GPUTextureUsage.TEXTURE_BINDING |
         GPUTextureUsage.COPY_DST,
     });
-    initializeTextures(this.textureManager, this.resources.device);
 
     // Create divergence texture
     this.textureManager.createTexture("divergence", {
       label: "Divergence texture",
-      size: [GRID_SIZE, GRID_SIZE],
+      size: GRID_SIZE,
       format: "r32float",
       usage:
         GPUTextureUsage.TEXTURE_BINDING |
@@ -121,7 +184,7 @@ class SmokeSimulation {
     // Create pressure texture (ping-pong)
     this.textureManager.createPingPongTexture("pressure", {
       label: "Pressure Texture",
-      size: [GRID_SIZE, GRID_SIZE],
+      size: GRID_SIZE,
       format: "r32float",
       usage:
         GPUTextureUsage.STORAGE_BINDING |
@@ -129,8 +192,40 @@ class SmokeSimulation {
         GPUTextureUsage.COPY_DST,
     });
 
+    // Smoke particle texture (positions)
+    this.textureManager.createPingPongTexture("smokeParticlePosition", {
+      label: "Smoke Position Texture",
+      size: SMOKE_PARTICLE_DIMENSIONS,
+      format: "rg32float",
+      usage:
+        GPUTextureUsage.STORAGE_BINDING |
+        GPUTextureUsage.TEXTURE_BINDING |
+        GPUTextureUsage.COPY_DST,
+    });
+
+    // Smoke density texture
+    this.textureManager.createPingPongTexture("smokeDensity", {
+      label: "Smoke Density Texture",
+      size: GRID_SIZE,
+      format: "r32float",
+      usage:
+        GPUTextureUsage.STORAGE_BINDING |
+        GPUTextureUsage.TEXTURE_BINDING |
+        GPUTextureUsage.COPY_DST,
+    });
+
+    initializeTextures(this.textureManager, this.resources.device);
+
     // Initialize simulation passes
-    this.advectionPass = new AdvectionPass(
+    this.advectionPass = new VelocityAdvectionPass(
+      this.resources.device,
+      WORKGROUP_SIZE
+    );
+    this.smokeAdvectionPass = new SmokeAdvectionPasss(
+      this.resources.device,
+      WORKGROUP_SIZE
+    );
+    this.smokeDiffusionPass = new SmokeDiffusionPass(
       this.resources.device,
       WORKGROUP_SIZE
     );
@@ -190,6 +285,8 @@ class SmokeSimulation {
       !this.divergencePass ||
       !this.pressurePass ||
       !this.gradientSubtractionPass ||
+      !this.smokeAdvectionPass ||
+      !this.smokeDiffusionPass ||
       !this.renderingPass ||
       !this.isInitialized
     ) {
@@ -319,7 +416,45 @@ class SmokeSimulation {
       );
       gradientPassEncoder.end();
       this.textureManager.swap("velocity");
+
+      // Smoke Advection Pass
+      const smokeAdvectionBuffer = this.createUniformBuffer(
+        UniformBufferUtils.createAdvectionUniforms(TIMESTEP, SMOKE_ADVECTION),
+        "Smoke Advection UBO"
+      );
+      const smokeDensityPassEncoder = commandEncoder.beginComputePass({
+        label: "Smoke Density Advection Compute Pass",
+      });
+      this.smokeAdvectionPass.execute(
+        smokeDensityPassEncoder,
+        {
+          textureManager: this.textureManager,
+          uniformBuffer: smokeAdvectionBuffer,
+        },
+        WORKGROUP_COUNT
+      );
+      smokeDensityPassEncoder.end();
+      this.textureManager.swap("smokeDensity");
     }
+
+    const smokeDiffusionBuffer = this.createUniformBuffer(
+      UniformBufferUtils.createDiffusionUniforms(TIMESTEP, SMOKE_DIFFUSION),
+      "Smoke Diffusion UBO"
+    );
+    const smokeDiffusionPassEncoder = commandEncoder.beginComputePass({
+      label: "Smoke Density Diffusion Compute Pass",
+    });
+    this.smokeDiffusionPass.executeIterations(
+      smokeDiffusionPassEncoder,
+      {
+        textureManager: this.textureManager,
+        uniformBuffer: smokeDiffusionBuffer,
+      },
+      WORKGROUP_COUNT,
+      DIFFUSION_ITERATIONS
+    );
+    smokeDiffusionPassEncoder.end();
+    this.textureManager.swap("smokeDensity");
 
     // Render Pass
     const renderPassEncoder = commandEncoder.beginRenderPass({
@@ -329,7 +464,7 @@ class SmokeSimulation {
           view: this.resources.context.getCurrentTexture().createView(),
           loadOp: "clear",
           storeOp: "store",
-          clearValue: { r: 0.0, g: 0.0, b: 0.0, a: 0.0 },
+          clearValue: { r: 0, g: 0, b: 0, a: 0 },
         },
       ],
     });
@@ -344,8 +479,8 @@ class SmokeSimulation {
         sampler: this.resources.device.createSampler({
           label: "Render Sampler",
         }),
-        shaderMode: ShaderMode.VELOCITY,
-        texture: "velocity",
+        shaderMode: ShaderMode.DENSITY,
+        texture: "smokeDensity",
       }
     );
 

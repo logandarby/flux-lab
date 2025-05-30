@@ -13,7 +13,7 @@ enum BindGroupLayoutType {
   READ_READ_WRITE_UNIFORM = "read_read_write_uniform",
   READ_WRITE_UNIFORM = "read_write_uniform",
   // Special case for pressure calculation - output must be r32float instead of r32float
-  PRESSURE = "pressure",
+  READ_READ_WRITE_1 = "pressure",
   // Special case for gradient subtraction - pressure is r32float, velocity/output is rg32float
   GRADIENT = "gradient",
 }
@@ -84,7 +84,7 @@ const BIND_GROUP_LAYOUT_DESCRIPTOR_RECORD: Record<
       },
     ],
   },
-  [BindGroupLayoutType.PRESSURE]: {
+  [BindGroupLayoutType.READ_READ_WRITE_1]: {
     label: "Pressure Bind Group Layout",
     entries: [
       {
@@ -169,7 +169,149 @@ class BindLayoutManager {
 /**
  * Advects quantities using the velocity field via semi-Lagrangian method
  */
-export class AdvectionPass extends ComputePass<SmokeTextureID> {
+export class SmokeAdvectionPasss extends ComputePass<SmokeTextureID> {
+  constructor(device: GPUDevice, workgroupSize: number) {
+    super(
+      {
+        name: "Smoke Density Advection",
+        entryPoint: "compute_main",
+        shader: device.createShaderModule({
+          label: "Advection Shader",
+          code: injectShaderVariables(advectionShaderTemplate, {
+            WORKGROUP_SIZE: workgroupSize,
+            OUT_FORMAT: "r32float",
+          }),
+        }),
+      },
+      device
+    );
+  }
+
+  protected createBindGroupLayout(): GPUBindGroupLayout {
+    return BindLayoutManager.getBindGroupLayout(
+      this.device,
+      BindGroupLayoutType.READ_READ_WRITE_1
+    );
+  }
+
+  protected createBindGroup(args: BindGroupArgs<SmokeTextureID>): GPUBindGroup {
+    this.validateArgs(args, ["textureManager", "uniformBuffer"]);
+
+    return this.device.createBindGroup({
+      label: "Advection Bind Group",
+      layout: this.bindGroupLayout,
+      entries: [
+        {
+          binding: 0,
+          resource: args
+            .textureManager!.getCurrentTexture("velocity")
+            .createView(),
+        },
+        {
+          binding: 1,
+          resource: args
+            .textureManager!.getCurrentTexture("smokeDensity")
+            .createView(),
+        },
+        {
+          binding: 2,
+          resource: args
+            .textureManager!.getBackTexture("smokeDensity")
+            .createView(),
+        },
+        {
+          binding: 3,
+          resource: { buffer: args.uniformBuffer! },
+        },
+      ],
+    });
+  }
+}
+
+/**
+ * Diffuses the smoke density field using Jacobi iterations to solve the diffusion equation
+ */
+export class SmokeDiffusionPass extends ComputePass<SmokeTextureID> {
+  constructor(device: GPUDevice, workgroupSize: number) {
+    super(
+      {
+        name: "Diffusion",
+        entryPoint: "compute_main",
+        shader: device.createShaderModule({
+          label: "Diffusion Shader",
+          code: injectShaderVariables(jacobiIterationShaderTemplate, {
+            WORKGROUP_SIZE: workgroupSize,
+            FORMAT: "r32float",
+          }),
+        }),
+      },
+      device
+    );
+  }
+
+  protected createBindGroupLayout(): GPUBindGroupLayout {
+    return BindLayoutManager.getBindGroupLayout(
+      this.device,
+      BindGroupLayoutType.READ_READ_WRITE_1
+    );
+  }
+
+  protected createBindGroup(args: BindGroupArgs<SmokeTextureID>): GPUBindGroup {
+    this.validateArgs(args, ["textureManager", "uniformBuffer"]);
+
+    return this.device.createBindGroup({
+      label: "Diffusion Bind Group",
+      layout: this.bindGroupLayout,
+      entries: [
+        {
+          binding: 0,
+          resource: args
+            .textureManager!.getCurrentTexture("smokeDensity")
+            .createView(),
+        },
+        {
+          binding: 1,
+          resource: args
+            .textureManager!.getCurrentTexture("smokeDensity")
+            .createView(),
+        },
+        {
+          binding: 2,
+          resource: args
+            .textureManager!.getBackTexture("smokeDensity")
+            .createView(),
+        },
+        {
+          binding: 3,
+          resource: { buffer: args.uniformBuffer! },
+        },
+      ],
+    });
+  }
+
+  public executeIterations(
+    pass: GPUComputePassEncoder,
+    bindGroupArgs: BindGroupArgs<SmokeTextureID>,
+    workgroupCount: number,
+    iterations: number
+  ): void {
+    for (let i = 0; i < iterations; i++) {
+      const bindGroup = this.createBindGroup(bindGroupArgs);
+
+      pass.setPipeline(this.pipeline);
+      pass.setBindGroup(0, bindGroup);
+      pass.dispatchWorkgroups(workgroupCount, workgroupCount);
+
+      // Swap textures for next iteration
+      bindGroupArgs.textureManager?.swap("smokeDensity");
+    }
+  }
+}
+
+/**
+ * Advects quantities using the velocity field via semi-Lagrangian method
+ */
+export class VelocityAdvectionPass extends ComputePass<SmokeTextureID> {
   constructor(device: GPUDevice, workgroupSize: number) {
     super(
       {
@@ -179,6 +321,7 @@ export class AdvectionPass extends ComputePass<SmokeTextureID> {
           label: "Advection Shader",
           code: injectShaderVariables(advectionShaderTemplate, {
             WORKGROUP_SIZE: workgroupSize,
+            OUT_FORMAT: "rg32float",
           }),
         }),
       },
@@ -224,17 +367,6 @@ export class AdvectionPass extends ComputePass<SmokeTextureID> {
         },
       ],
     });
-  }
-
-  private validateArgs(
-    args: BindGroupArgs<SmokeTextureID>,
-    required: (keyof BindGroupArgs<SmokeTextureID>)[]
-  ): void {
-    for (const key of required) {
-      if (!args[key]) {
-        throw new Error(`${key} is required for ${this.config.name}`);
-      }
-    }
   }
 }
 
@@ -316,17 +448,6 @@ export class DiffusionPass extends ComputePass<SmokeTextureID> {
       bindGroupArgs.textureManager?.swap("velocity");
     }
   }
-
-  private validateArgs(
-    args: BindGroupArgs<SmokeTextureID>,
-    required: (keyof BindGroupArgs<SmokeTextureID>)[]
-  ): void {
-    for (const key of required) {
-      if (!args[key]) {
-        throw new Error(`${key} is required for ${this.config.name}`);
-      }
-    }
-  }
 }
 
 /**
@@ -382,17 +503,6 @@ export class DivergencePass extends ComputePass<SmokeTextureID> {
       ],
     });
   }
-
-  private validateArgs(
-    args: BindGroupArgs<SmokeTextureID>,
-    required: (keyof BindGroupArgs<SmokeTextureID>)[]
-  ): void {
-    for (const key of required) {
-      if (!args[key]) {
-        throw new Error(`${key} is required for ${this.config.name}`);
-      }
-    }
-  }
 }
 
 /**
@@ -419,7 +529,7 @@ export class PressurePass extends ComputePass<SmokeTextureID> {
   protected createBindGroupLayout(): GPUBindGroupLayout {
     return BindLayoutManager.getBindGroupLayout(
       this.device,
-      BindGroupLayoutType.PRESSURE
+      BindGroupLayoutType.READ_READ_WRITE_1
     );
   }
 
@@ -471,17 +581,6 @@ export class PressurePass extends ComputePass<SmokeTextureID> {
 
       // Swap pressure textures for next iteration
       bindGroupArgs.textureManager?.swap("pressure");
-    }
-  }
-
-  private validateArgs(
-    args: BindGroupArgs<SmokeTextureID>,
-    required: (keyof BindGroupArgs<SmokeTextureID>)[]
-  ): void {
-    for (const key of required) {
-      if (!args[key]) {
-        throw new Error(`${key} is required for ${this.config.name}`);
-      }
     }
   }
 }
@@ -545,17 +644,6 @@ export class GradientSubtractionPass extends ComputePass<SmokeTextureID> {
         },
       ],
     });
-  }
-
-  private validateArgs(
-    args: BindGroupArgs<SmokeTextureID>,
-    required: (keyof BindGroupArgs<SmokeTextureID>)[]
-  ): void {
-    for (const key of required) {
-      if (!args[key]) {
-        throw new Error(`${key} is required for ${this.config.name}`);
-      }
-    }
   }
 }
 
