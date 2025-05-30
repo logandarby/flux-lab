@@ -7,6 +7,14 @@ import jacobiIterationShaderTemplate from "../shaders/jacobiIteration.wgsl?raw";
 // import pressureJacobiShader from "../shaders/pressureJacobi.wgsl?raw";
 import divergenceShaderTemplate from "../shaders/divergenceShader.wgsl?raw";
 import gradientSubtractionShaderTemplate from "../shaders/gradientSubtractionShader.wgsl?raw";
+import boundaryConditionsShaderTemplate from "../shaders/boundaryConditionsShader.wgsl?raw";
+
+// Boundary condition types
+export enum BoundaryType {
+  NO_SLIP_VELOCITY = 0, // No-slip velocity boundary condition
+  FREE_SLIP_VELOCITY = 1, // Free-slip velocity boundary condition
+  SCALAR_NEUMANN = 2, // Neumann boundary condition for scalar fields
+}
 
 // Common bind group layout types for optimization
 enum BindGroupLayoutType {
@@ -16,6 +24,8 @@ enum BindGroupLayoutType {
   READ_READ_WRITE_1 = "pressure",
   // Special case for gradient subtraction - pressure is r32float, velocity/output is rg32float
   GRADIENT = "gradient",
+  // Special case for boundary conditions - supports both single and dual channel textures
+  BOUNDARY = "boundary",
 }
 
 const BIND_GROUP_LAYOUT_DESCRIPTOR_RECORD: Record<
@@ -137,6 +147,30 @@ const BIND_GROUP_LAYOUT_DESCRIPTOR_RECORD: Record<
       },
       {
         binding: 3,
+        visibility: GPUShaderStage.COMPUTE,
+        buffer: { type: "uniform" },
+      },
+    ],
+  },
+  [BindGroupLayoutType.BOUNDARY]: {
+    label: "Boundary Conditions Bind Group Layout",
+    entries: [
+      {
+        binding: 0,
+        visibility: GPUShaderStage.COMPUTE,
+        texture: { sampleType: "unfilterable-float", viewDimension: "2d" }, // input field
+      },
+      {
+        binding: 1,
+        visibility: GPUShaderStage.COMPUTE,
+        storageTexture: {
+          format: "rg32float", // Default format, will be overridden
+          access: "write-only",
+          viewDimension: "2d",
+        }, // output field
+      },
+      {
+        binding: 2,
         visibility: GPUShaderStage.COMPUTE,
         buffer: { type: "uniform" },
       },
@@ -647,6 +681,196 @@ export class GradientSubtractionPass extends ComputePass<SmokeTextureID> {
   }
 }
 
+/**
+ * Enforces boundary conditions on velocity and scalar fields
+ */
+export class BoundaryConditionsPass extends ComputePass<SmokeTextureID> {
+  private velocityShader: GPUShaderModule;
+  private scalarShader: GPUShaderModule;
+  private velocityPipeline: GPUComputePipeline | null = null;
+  private scalarPipeline: GPUComputePipeline | null = null;
+
+  constructor(device: GPUDevice, workgroupSize: number) {
+    // Create shaders for different texture formats
+    const velocityShaderCode = injectShaderVariables(
+      boundaryConditionsShaderTemplate,
+      {
+        WORKGROUP_SIZE: workgroupSize,
+        FORMAT: "rg32float",
+      }
+    );
+
+    const scalarShaderCode = injectShaderVariables(
+      boundaryConditionsShaderTemplate,
+      {
+        WORKGROUP_SIZE: workgroupSize,
+        FORMAT: "r32float",
+      }
+    );
+
+    const velocityShader = device.createShaderModule({
+      label: "Boundary Conditions Velocity Shader",
+      code: velocityShaderCode,
+    });
+
+    const scalarShader = device.createShaderModule({
+      label: "Boundary Conditions Scalar Shader",
+      code: scalarShaderCode,
+    });
+
+    // Use velocity shader as the default
+    super(
+      {
+        name: "Boundary Conditions",
+        entryPoint: "compute_main",
+        shader: velocityShader,
+      },
+      device
+    );
+
+    this.velocityShader = velocityShader;
+    this.scalarShader = scalarShader;
+  }
+
+  private getVelocityBindGroupLayout(): GPUBindGroupLayout {
+    return this.device.createBindGroupLayout({
+      label: "Boundary Velocity Bind Group Layout",
+      entries: [
+        {
+          binding: 0,
+          visibility: GPUShaderStage.COMPUTE,
+          texture: { sampleType: "unfilterable-float", viewDimension: "2d" },
+        },
+        {
+          binding: 1,
+          visibility: GPUShaderStage.COMPUTE,
+          storageTexture: {
+            format: "rg32float",
+            access: "write-only",
+            viewDimension: "2d",
+          },
+        },
+        {
+          binding: 2,
+          visibility: GPUShaderStage.COMPUTE,
+          buffer: { type: "uniform" },
+        },
+      ],
+    });
+  }
+
+  private getScalarBindGroupLayout(): GPUBindGroupLayout {
+    return this.device.createBindGroupLayout({
+      label: "Boundary Scalar Bind Group Layout",
+      entries: [
+        {
+          binding: 0,
+          visibility: GPUShaderStage.COMPUTE,
+          texture: { sampleType: "unfilterable-float", viewDimension: "2d" },
+        },
+        {
+          binding: 1,
+          visibility: GPUShaderStage.COMPUTE,
+          storageTexture: {
+            format: "r32float",
+            access: "write-only",
+            viewDimension: "2d",
+          },
+        },
+        {
+          binding: 2,
+          visibility: GPUShaderStage.COMPUTE,
+          buffer: { type: "uniform" },
+        },
+      ],
+    });
+  }
+
+  private getVelocityPipeline(): GPUComputePipeline {
+    if (!this.velocityPipeline) {
+      this.velocityPipeline = this.device.createComputePipeline({
+        label: "Boundary Conditions Velocity Pipeline",
+        layout: this.device.createPipelineLayout({
+          bindGroupLayouts: [this.getVelocityBindGroupLayout()],
+        }),
+        compute: {
+          module: this.velocityShader,
+          entryPoint: "compute_main",
+        },
+      });
+    }
+    return this.velocityPipeline;
+  }
+
+  private getScalarPipeline(): GPUComputePipeline {
+    if (!this.scalarPipeline) {
+      this.scalarPipeline = this.device.createComputePipeline({
+        label: "Boundary Conditions Scalar Pipeline",
+        layout: this.device.createPipelineLayout({
+          bindGroupLayouts: [this.getScalarBindGroupLayout()],
+        }),
+        compute: {
+          module: this.scalarShader,
+          entryPoint: "compute_main",
+        },
+      });
+    }
+    return this.scalarPipeline;
+  }
+
+  // These methods are required by the base class but won't be used
+  protected createBindGroupLayout(): GPUBindGroupLayout {
+    return this.getVelocityBindGroupLayout();
+  }
+
+  protected createBindGroup(_: BindGroupArgs<SmokeTextureID>): GPUBindGroup {
+    throw new Error("Use executeForTexture method instead");
+  }
+
+  public executeForTexture(
+    pass: GPUComputePassEncoder,
+    textureId: SmokeTextureID,
+    bindGroupArgs: BindGroupArgs<SmokeTextureID>,
+    workgroupCount: number
+  ): void {
+    this.validateArgs(bindGroupArgs, ["textureManager", "uniformBuffer"]);
+
+    const isVelocityTexture = textureId === "velocity";
+    const pipeline = isVelocityTexture
+      ? this.getVelocityPipeline()
+      : this.getScalarPipeline();
+
+    const bindGroup = this.device.createBindGroup({
+      label: `Boundary ${textureId} Bind Group`,
+      layout: isVelocityTexture
+        ? this.getVelocityBindGroupLayout()
+        : this.getScalarBindGroupLayout(),
+      entries: [
+        {
+          binding: 0,
+          resource: bindGroupArgs
+            .textureManager!.getCurrentTexture(textureId)
+            .createView(),
+        },
+        {
+          binding: 1,
+          resource: bindGroupArgs
+            .textureManager!.getBackTexture(textureId)
+            .createView(),
+        },
+        {
+          binding: 2,
+          resource: { buffer: bindGroupArgs.uniformBuffer! },
+        },
+      ],
+    });
+
+    pass.setPipeline(pipeline);
+    pass.setBindGroup(0, bindGroup);
+    pass.dispatchWorkgroups(workgroupCount, workgroupCount);
+  }
+}
+
 /*
  * Uniform buffer utilities for creating consistent buffer data
  */
@@ -685,5 +909,12 @@ export class UniformBufferUtils {
   ): Float32Array {
     const halfRdx = 0.5 / gridScale;
     return new Float32Array([halfRdx]);
+  }
+
+  public static createBoundaryUniforms(
+    boundaryType: BoundaryType,
+    scale: number = 1.0
+  ): Float32Array {
+    return new Float32Array([boundaryType, scale]);
   }
 }

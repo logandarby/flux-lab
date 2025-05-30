@@ -57,10 +57,11 @@ fn shadeVelocity(value: vec2f, input: VertexOutput) -> vec4f {
 
 fn shadePressure(value: f32, input: VertexOutput) -> vec4f {
     // Pressure
+    let DAMP = 30.0;
     if (value < 0) {
-        return vec4f(-value, 0, 0, 1);
+        return vec4f(-value, 0, 0, 1) / DAMP;
     } else {
-        return vec4f(0, 0, value, 1);
+        return vec4f(0, 0, value, 1) / DAMP;
     }
 }
 
