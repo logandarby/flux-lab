@@ -41,7 +41,8 @@ fn fragment_main(input: VertexOutput) -> @location(0)vec4f {
 
     // Velocity
     let pi = 3.14159;
-    let angle = atan(value.y / value.x);
+    // let angle = atan(value.y / value.x);
+    let angle = acos((value.y * value.y) / (dot(value.xy, value.xy)));
     let magnitude = sqrt(dot(value.xy, value.xy));
     let color = vec3f(cos(angle), cos(angle + 2 * pi / 3), cos(angle - 2 * pi / 3));
     return vec4f(color * magnitude, 0);

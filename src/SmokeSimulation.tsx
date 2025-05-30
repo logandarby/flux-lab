@@ -23,17 +23,19 @@ import {
 
 const CANVAS_WIDTH = 2 ** 9;
 const CANVAS_HEIGHT = CANVAS_WIDTH;
-const GRID_SIZE = 16 * 7; // 16x16 grid
-const GRID_SCALE = 1;
-const WORKGROUP_SIZE = 8;
+const GRID_SIZE = 2 ** 9; // 16x16 grid
+const GRID_SCALE = 3;
+const WORKGROUP_SIZE = 16;
 const WORKGROUP_COUNT = Math.ceil(GRID_SIZE / WORKGROUP_SIZE);
 // const VISCOSITY = 1;
-const DIFFUSION_FACTOR = 0.02; // Smaller = slower diffusion
-const VELOCITY_ADVECTION = 5; // Smaller = slower velocity advection
+const DIFFUSION_FACTOR = 0.1; // Smaller = slower diffusion
+const VELOCITY_ADVECTION = 10; // Smaller = slower velocity advection
 const TIMESTEP = 1.0 / 30.0;
-const INIT_VELOCITY = [10, 10]; // TEMP
 const DIFFUSION_ITERATIONS = 20;
 const PRESSURE_ITERATIONS = 100;
+
+const INIT_VELOCITY = [-10, -10]; // TEMP
+const INIT_VELOCITY_SQUARE_SIZE = 2 ** 6;
 
 // Utils
 
@@ -54,7 +56,7 @@ function initializeTextures(
   const velocityData = Array(GRID_SIZE * GRID_SIZE).fill([0.0, 0.0]);
   const x = GRID_SIZE / 2;
   const y = GRID_SIZE / 2;
-  const size = 8;
+  const size = INIT_VELOCITY_SQUARE_SIZE;
   for (let i = 0; i < size; i++) {
     for (let j = 0; j < size; j++) {
       velocityData[x + i + GRID_SIZE * (y + j)] = INIT_VELOCITY;
@@ -247,7 +249,7 @@ class SmokeSimulation {
       const diffusionPassEncoder = commandEncoder.beginComputePass({
         label: "Diffusion Compute Pass",
       });
-      this.diffusionPass.execute(
+      this.diffusionPass.executeIterations(
         diffusionPassEncoder,
         {
           textureManager: this.textureManager,
@@ -291,7 +293,7 @@ class SmokeSimulation {
       const pressurePassEncoder = commandEncoder.beginComputePass({
         label: "Pressure Compute Pass",
       });
-      this.pressurePass.execute(
+      this.pressurePass.executeIterations(
         pressurePassEncoder,
         {
           textureManager: this.textureManager,

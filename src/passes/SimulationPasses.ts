@@ -298,7 +298,7 @@ export class DiffusionPass extends ComputePass<SmokeTextureID> {
     });
   }
 
-  public override execute(
+  public executeIterations(
     pass: GPUComputePassEncoder,
     bindGroupArgs: BindGroupArgs<SmokeTextureID>,
     workgroupCount: number,
@@ -454,7 +454,7 @@ export class PressurePass extends ComputePass<SmokeTextureID> {
     });
   }
 
-  public override execute(
+  public executeIterations(
     pass: GPUComputePassEncoder,
     bindGroupArgs: BindGroupArgs<SmokeTextureID>,
     workgroupCount: number,
