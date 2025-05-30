@@ -16,6 +16,7 @@ import advectionShaderTemplate from "../../shaders/advectionShader.wgsl?raw";
 const GRID_SIZE = 16; // 8x8 grid
 const WORKGROUP_SIZE = 8;
 const WORKGROUP_COUNT = Math.ceil(GRID_SIZE / WORKGROUP_SIZE);
+const ADVECTION_FACTOR = 0.1;
 
 // Direction enumeration for cardinal and ordinal directions
 enum AdvectionDirection {
@@ -188,6 +189,7 @@ export class AdvectionPass extends ComputePass<SmokeTextureID> {
 
 class AdvectionTestSimulation {
   private resources: WebGPUResources | null = null;
+  private sampler: GPUSampler | null = null;
   private textureManager: TextureManager<AdvectionTextureID> | null = null;
   private advectionPass: AdvectionPass | null = null;
   private renderingPass: RenderTexturePass | null = null;
@@ -220,6 +222,10 @@ class AdvectionTestSimulation {
         GPUTextureUsage.COPY_DST,
     });
 
+    this.sampler = this.resources.device.createSampler({
+      label: "Texture Sampler",
+    });
+
     // Initialize velocity field with test pattern in the specified direction
     initializeVelocityField(
       this.textureManager.getCurrentTexture("velocity"),
@@ -237,6 +243,7 @@ class AdvectionTestSimulation {
     });
     this.renderingPass = new RenderTexturePass(
       {
+        outputTextureName: "velocity",
         name: "Advection Test Rendering",
         vertex: {
           module: textureShaderModule,
@@ -278,7 +285,7 @@ class AdvectionTestSimulation {
       // Create uniform values for the advection pass
       const uniformValues = new Float32Array([
         1.0 / 30.0, // timestep
-        1.0, // rdx
+        ADVECTION_FACTOR,
       ]);
       const uniformBuffer = this.resources.device.createBuffer({
         label: "Advection UBO",
@@ -323,7 +330,10 @@ class AdvectionTestSimulation {
       {
         vertexCount: 6,
       },
-      this.textureManager
+      {
+        sampler: this.sampler!,
+        textureManager: this.textureManager,
+      }
     );
 
     renderPassEncoder.end();

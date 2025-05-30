@@ -23,9 +23,8 @@ export abstract class ComputePass<TextureID extends string | number> {
     this.initializePipeline();
   }
 
-  private async initializePipeline(): Promise<void> {
+  private initializePipeline(): void {
     // Delay pipeline setup to allow derived classes to initialize
-    await Promise.resolve(); // Wait for next microtask
     const { pipeline, bindGroupLayout } = this.setupPipeline();
     this.pipeline = pipeline;
     this.bindGroupLayout = bindGroupLayout;
@@ -55,15 +54,16 @@ export abstract class ComputePass<TextureID extends string | number> {
     bindGroupArgs: BindGroupArgs<TextureID>
   ): GPUBindGroup;
 
-  public async execute(
+  public execute(
     pass: GPUComputePassEncoder,
     bindGroupArgs: BindGroupArgs<TextureID>,
     workgroupCount: number
-  ): Promise<void> {
+  ): void {
     if (!this.initialized) {
-      await this.initializePipeline();
+      throw new Error(
+        `Compute Pass "${this.config.name} is not intialized yet"`
+      );
     }
-
     const bindGroup = this.createBindGroup(bindGroupArgs);
 
     pass.setPipeline(this.pipeline);

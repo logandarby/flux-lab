@@ -32,7 +32,9 @@ export class TextureManager<TextureID extends string | number> {
     descriptor: GPUTextureDescriptor
   ): void {
     if (this.textures.has(name)) {
-      throw new Error(`Texture ${name} already exists inside TextureManager!`);
+      throw new Error(
+        `Texture "${name}" already exists inside TextureManager!`
+      );
     }
     const texture1 = this.device.createTexture(descriptor);
     const texture2 = this.device.createTexture(descriptor);
@@ -60,7 +62,7 @@ export class TextureManager<TextureID extends string | number> {
   public getCurrentTexture(name: TextureID): GPUTexture {
     const frontTexture = this.textures.get(name);
     if (!frontTexture) {
-      throw new Error(`Texture ${name} does not exist`);
+      throw new Error(`Texture "${name}" does not exist`);
     }
     return frontTexture.front;
   }

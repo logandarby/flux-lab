@@ -29,5 +29,20 @@ fn vertex_main(
 
 @fragment
 fn fragment_main(input: VertexOutput) -> @location(0)vec4f {
-    return abs(textureSample(texture, textureSampler, input.texCoord));
+    let DAMP: f32 = 2;
+    let value = textureSample(texture, textureSampler, input.texCoord) / DAMP;
+
+    // Pressure
+    // if (value.x < 0) {
+    //     return vec4f(-value.x, 0, 0, 1);
+    // } else {
+    //     return vec4f(0, 0, value.x, 1);
+    // }
+
+    // Velocity
+    let pi = 3.14159;
+    let angle = atan(value.y / value.x);
+    let magnitude = sqrt(dot(value.xy, value.xy));
+    let color = vec3f(cos(angle), cos(angle + 2 * pi / 3), cos(angle - 2 * pi / 3));
+    return vec4f(color * magnitude, 0);
 }

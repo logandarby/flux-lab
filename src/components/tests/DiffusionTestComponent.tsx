@@ -153,7 +153,7 @@ class DiffusionPass extends ComputePass<SmokeTextureID> {
     });
   }
 
-  public override execute(
+  public override async execute(
     pass: GPUComputePassEncoder,
     bindGroupArgs: BindGroupArgs<SmokeTextureID>,
     workgroupCount: number
@@ -174,6 +174,7 @@ class DiffusionPass extends ComputePass<SmokeTextureID> {
 class DiffusionTestSimulation {
   private resources: WebGPUResources | null = null;
   private textureManager: TextureManager<SmokeTextureID> | null = null;
+  private sampler: GPUSampler | null = null;
   private diffusionPass: DiffusionPass | null = null; // Reusing AdvectionPass for now
   private renderingPass: RenderTexturePass | null = null;
 
@@ -190,6 +191,10 @@ class DiffusionTestSimulation {
     this.textureManager = new TextureManager<SmokeTextureID>(
       this.resources.device
     );
+
+    this.sampler = this.resources.device.createSampler({
+      label: "Diffusion Rendering Sampler ",
+    });
 
     // Create diffusion texture (ping-pong for diffusion) - using "velocity" texture ID
     this.textureManager.createPingPongTexture("velocity", {
@@ -218,6 +223,7 @@ class DiffusionTestSimulation {
     });
     this.renderingPass = new RenderTexturePass(
       {
+        outputTextureName: "velocity",
         name: "Diffusion Test Rendering",
         vertex: {
           module: textureShaderModule,
@@ -258,8 +264,8 @@ class DiffusionTestSimulation {
     if (!renderOnly) {
       // Create uniform values for the diffusion pass
       const timestep = 1 / 30;
-      const rdx = 1 / GRID_SIZE;
-      const alpha = rdx ** 2 / timestep;
+      const diffusionFactor = 0.01;
+      const alpha = 1 / diffusionFactor / timestep;
       const uniformValues = new Float32Array([alpha, 1 / (4 + alpha)]);
       const uniformBuffer = this.resources.device.createBuffer({
         label: "Diffusion UBO",
@@ -303,7 +309,10 @@ class DiffusionTestSimulation {
       {
         vertexCount: 6,
       },
-      this.textureManager
+      {
+        sampler: this.sampler!,
+        textureManager: this.textureManager,
+      }
     );
 
     renderPassEncoder.end();

@@ -1,9 +1,15 @@
-import type { TextureManager } from "@/SmokeSimulation";
+import type { TextureManager } from "./TextureManager";
 
-export interface RenderPassConfig {
+export interface RenderPassConfig<TextureID extends string | number> {
   name: string;
   vertex: GPUVertexState;
   fragment: GPUFragmentState;
+  outputTextureName: TextureID;
+}
+
+export interface RenderPassBindArgs<TextureID extends string | number> {
+  textureManager: TextureManager<TextureID>;
+  sampler: GPUSampler;
 }
 
 export interface RenderPassDrawConfig {
@@ -16,7 +22,7 @@ export abstract class RenderPass<TextureID extends string | number> {
   protected readonly bindGroupLayout: GPUBindGroupLayout;
 
   constructor(
-    protected readonly config: RenderPassConfig,
+    protected readonly config: RenderPassConfig<TextureID>,
     protected readonly device: GPUDevice
   ) {
     this.bindGroupLayout = this.createBindGroupLayout();
@@ -31,17 +37,57 @@ export abstract class RenderPass<TextureID extends string | number> {
     });
   }
 
-  protected abstract createBindGroupLayout(): GPUBindGroupLayout;
-  protected abstract createBindGroup(
-    textureManager?: TextureManager<TextureID>
-  ): GPUBindGroup;
+  protected createBindGroupLayout(): GPUBindGroupLayout {
+    return this.device.createBindGroupLayout({
+      label: "Texture Rendering Bind Group Layout",
+      entries: [
+        {
+          binding: 0,
+          visibility: GPUShaderStage.FRAGMENT,
+          texture: {
+            sampleType: "unfilterable-float",
+            viewDimension: "2d",
+            multisampled: false,
+          },
+        },
+        {
+          binding: 1,
+          visibility: GPUShaderStage.FRAGMENT,
+          sampler: {
+            type: "non-filtering",
+          },
+        },
+      ],
+    });
+  }
+  protected createBindGroup({
+    textureManager,
+    sampler,
+  }: RenderPassBindArgs<TextureID>): GPUBindGroup {
+    return this.device.createBindGroup({
+      label: "Smoke Texture Bind Group",
+      layout: this.bindGroupLayout,
+      entries: [
+        {
+          binding: 0,
+          resource: textureManager
+            .getCurrentTexture(this.config.outputTextureName)
+            .createView(),
+        },
+        {
+          binding: 1,
+          resource: sampler,
+        },
+      ],
+    });
+  }
 
   public execute(
     pass: GPURenderPassEncoder,
     drawConfig: RenderPassDrawConfig,
-    textureManager?: TextureManager<TextureID>
+    args: RenderPassBindArgs<TextureID>
   ): void {
-    const bindGroup = this.createBindGroup(textureManager);
+    const bindGroup = this.createBindGroup(args);
     pass.setPipeline(this.pipeline);
     pass.setBindGroup(0, bindGroup);
     pass.draw(drawConfig.vertexCount, drawConfig.instanceCount);

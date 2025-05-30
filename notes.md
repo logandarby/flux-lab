@@ -51,6 +51,11 @@ p = computePressure(u);
 u = subtractPressureGradient(u, p);
 ```
 
+## Name Ideas
+
+- Flux Lab
+- Smokesichord
+
 ## Notes
 
 - Maybe not just smoke, but water, fire, air, earth

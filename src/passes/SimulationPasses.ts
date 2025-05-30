@@ -8,117 +8,160 @@ import pressureJacobiShader from "../shaders/pressureJacobi.wgsl?raw";
 import divergenceShaderTemplate from "../shaders/divergenceShader.wgsl?raw";
 import gradientSubtractionShaderTemplate from "../shaders/gradientSubtractionShader.wgsl?raw";
 
-// Constants
-const DIFFUSION_ITERATIONS = 20;
-const PRESSURE_ITERATIONS = 40;
-
 // Common bind group layout types for optimization
 enum BindGroupLayoutType {
   READ_READ_WRITE_UNIFORM = "read_read_write_uniform",
   READ_WRITE_UNIFORM = "read_write_uniform",
+  // Special case for pressure calculation - output must be r32float instead of r32float
+  PRESSURE = "pressure",
+  // Special case for gradient subtraction - pressure is r32float, velocity/output is rg32float
+  GRADIENT = "gradient",
 }
 
-/**
- * Base class for simulation passes that provides common bind group layouts
- */
-abstract class SimulationPass extends ComputePass<SmokeTextureID> {
-  protected static bindGroupLayouts = new Map<string, GPUBindGroupLayout>();
+const BIND_GROUP_LAYOUT_DESCRIPTOR_RECORD: Record<
+  BindGroupLayoutType,
+  GPUBindGroupLayoutDescriptor
+> = {
+  [BindGroupLayoutType.READ_READ_WRITE_UNIFORM]: {
+    label: "Read-Read-Write-Uniform Layout",
+    entries: [
+      {
+        binding: 0,
+        visibility: GPUShaderStage.COMPUTE,
+        texture: {
+          sampleType: "unfilterable-float",
+          viewDimension: "2d",
+        },
+      },
+      {
+        binding: 1,
+        visibility: GPUShaderStage.COMPUTE,
+        texture: {
+          sampleType: "unfilterable-float",
+          viewDimension: "2d",
+        },
+      },
+      {
+        binding: 2,
+        visibility: GPUShaderStage.COMPUTE,
+        storageTexture: {
+          format: "rg32float",
+          access: "write-only",
+          viewDimension: "2d",
+        },
+      },
+      {
+        binding: 3,
+        visibility: GPUShaderStage.COMPUTE,
+        buffer: { type: "uniform" },
+      },
+    ],
+  },
+  [BindGroupLayoutType.READ_WRITE_UNIFORM]: {
+    label: "Read-Write-Uniform Layout",
+    entries: [
+      {
+        binding: 0,
+        visibility: GPUShaderStage.COMPUTE,
+        texture: {
+          sampleType: "unfilterable-float",
+          viewDimension: "2d",
+        },
+      },
+      {
+        binding: 1,
+        visibility: GPUShaderStage.COMPUTE,
+        storageTexture: {
+          format: "r32float",
+          access: "write-only",
+          viewDimension: "2d",
+        },
+      },
+      {
+        binding: 2,
+        visibility: GPUShaderStage.COMPUTE,
+        buffer: { type: "uniform" },
+      },
+    ],
+  },
+  [BindGroupLayoutType.PRESSURE]: {
+    label: "Pressure Bind Group Layout",
+    entries: [
+      {
+        binding: 0,
+        visibility: GPUShaderStage.COMPUTE,
+        texture: { sampleType: "unfilterable-float", viewDimension: "2d" },
+      },
+      {
+        binding: 1,
+        visibility: GPUShaderStage.COMPUTE,
+        texture: { sampleType: "unfilterable-float", viewDimension: "2d" },
+      },
+      {
+        binding: 2,
+        visibility: GPUShaderStage.COMPUTE,
+        storageTexture: {
+          format: "r32float",
+          access: "write-only",
+          viewDimension: "2d",
+        },
+      },
+      {
+        binding: 3,
+        visibility: GPUShaderStage.COMPUTE,
+        buffer: { type: "uniform" },
+      },
+    ],
+  },
+  [BindGroupLayoutType.GRADIENT]: {
+    label: "Gradient Subtraction Bind Group Layout",
+    entries: [
+      {
+        binding: 0,
+        visibility: GPUShaderStage.COMPUTE,
+        texture: { sampleType: "unfilterable-float", viewDimension: "2d" }, // pressure (r32float)
+      },
+      {
+        binding: 1,
+        visibility: GPUShaderStage.COMPUTE,
+        texture: { sampleType: "unfilterable-float", viewDimension: "2d" }, // velocity (rg32float)
+      },
+      {
+        binding: 2,
+        visibility: GPUShaderStage.COMPUTE,
+        storageTexture: {
+          format: "rg32float",
+          access: "write-only",
+          viewDimension: "2d",
+        }, // output velocity
+      },
+      {
+        binding: 3,
+        visibility: GPUShaderStage.COMPUTE,
+        buffer: { type: "uniform" },
+      },
+    ],
+  },
+};
 
-  constructor(
-    config: { name: string; entryPoint: string; shader: GPUShaderModule },
+class BindLayoutManager {
+  private static readonly layoutMap = new Map<string, GPUBindGroupLayout>();
+
+  public static getBindGroupLayout(
     device: GPUDevice,
-    private readonly layoutType: BindGroupLayoutType
+    layoutType: BindGroupLayoutType
   ) {
-    super(config, device);
-  }
-
-  protected createBindGroupLayout(): GPUBindGroupLayout {
-    if (!this.layoutType) {
-      throw new Error("Layout type not initialized");
+    const cacheKey = `${device.label || device.adapterInfo?.device || "device"}_${layoutType}`;
+    if (this.layoutMap.has(cacheKey)) {
+      return this.layoutMap.get(cacheKey)!;
     }
-
-    const cacheKey = `${this.device.label || "device"}_${this.layoutType}`;
-
-    if (SimulationPass.bindGroupLayouts.has(cacheKey)) {
-      return SimulationPass.bindGroupLayouts.get(cacheKey)!;
+    const layoutDesc: GPUBindGroupLayoutDescriptor | null =
+      BIND_GROUP_LAYOUT_DESCRIPTOR_RECORD[layoutType];
+    if (!layoutDesc) {
+      throw new Error(`Unknown layout type: ${layoutType}`);
     }
-
-    let layout: GPUBindGroupLayout;
-
-    switch (this.layoutType) {
-      case BindGroupLayoutType.READ_READ_WRITE_UNIFORM:
-        layout = this.device.createBindGroupLayout({
-          label: "Read-Read-Write-Uniform Layout",
-          entries: [
-            {
-              binding: 0,
-              visibility: GPUShaderStage.COMPUTE,
-              texture: {
-                sampleType: "unfilterable-float",
-                viewDimension: "2d",
-              },
-            },
-            {
-              binding: 1,
-              visibility: GPUShaderStage.COMPUTE,
-              texture: {
-                sampleType: "unfilterable-float",
-                viewDimension: "2d",
-              },
-            },
-            {
-              binding: 2,
-              visibility: GPUShaderStage.COMPUTE,
-              storageTexture: {
-                format: "rg32float",
-                access: "write-only",
-                viewDimension: "2d",
-              },
-            },
-            {
-              binding: 3,
-              visibility: GPUShaderStage.COMPUTE,
-              buffer: { type: "uniform" },
-            },
-          ],
-        });
-        break;
-
-      case BindGroupLayoutType.READ_WRITE_UNIFORM:
-        layout = this.device.createBindGroupLayout({
-          label: "Read-Write-Uniform Layout",
-          entries: [
-            {
-              binding: 0,
-              visibility: GPUShaderStage.COMPUTE,
-              texture: {
-                sampleType: "unfilterable-float",
-                viewDimension: "2d",
-              },
-            },
-            {
-              binding: 1,
-              visibility: GPUShaderStage.COMPUTE,
-              storageTexture: {
-                format: "r32float",
-                access: "write-only",
-                viewDimension: "2d",
-              },
-            },
-            {
-              binding: 2,
-              visibility: GPUShaderStage.COMPUTE,
-              buffer: { type: "uniform" },
-            },
-          ],
-        });
-        break;
-
-      default:
-        throw new Error(`Unknown layout type: ${this.layoutType}`);
-    }
-
-    SimulationPass.bindGroupLayouts.set(cacheKey, layout);
+    const layout = device.createBindGroupLayout(layoutDesc);
+    this.layoutMap.set(cacheKey, layout);
     return layout;
   }
 }
@@ -126,7 +169,7 @@ abstract class SimulationPass extends ComputePass<SmokeTextureID> {
 /**
  * Advects quantities using the velocity field via semi-Lagrangian method
  */
-export class AdvectionPass extends SimulationPass {
+export class AdvectionPass extends ComputePass<SmokeTextureID> {
   constructor(device: GPUDevice, workgroupSize: number) {
     super(
       {
@@ -139,7 +182,13 @@ export class AdvectionPass extends SimulationPass {
           }),
         }),
       },
-      device,
+      device
+    );
+  }
+
+  protected createBindGroupLayout(): GPUBindGroupLayout {
+    return BindLayoutManager.getBindGroupLayout(
+      this.device,
       BindGroupLayoutType.READ_READ_WRITE_UNIFORM
     );
   }
@@ -192,7 +241,7 @@ export class AdvectionPass extends SimulationPass {
 /**
  * Diffuses the velocity field using Jacobi iterations to solve the diffusion equation
  */
-export class DiffusionPass extends SimulationPass {
+export class DiffusionPass extends ComputePass<SmokeTextureID> {
   constructor(device: GPUDevice, workgroupSize: number) {
     super(
       {
@@ -205,7 +254,13 @@ export class DiffusionPass extends SimulationPass {
           }),
         }),
       },
-      device,
+      device
+    );
+  }
+
+  protected createBindGroupLayout(): GPUBindGroupLayout {
+    return BindLayoutManager.getBindGroupLayout(
+      this.device,
       BindGroupLayoutType.READ_READ_WRITE_UNIFORM
     );
   }
@@ -243,12 +298,13 @@ export class DiffusionPass extends SimulationPass {
     });
   }
 
-  public override async execute(
+  public override execute(
     pass: GPUComputePassEncoder,
     bindGroupArgs: BindGroupArgs<SmokeTextureID>,
-    workgroupCount: number
-  ): Promise<void> {
-    for (let i = 0; i < DIFFUSION_ITERATIONS; i++) {
+    workgroupCount: number,
+    iterations: number
+  ): void {
+    for (let i = 0; i < iterations; i++) {
       const bindGroup = this.createBindGroup(bindGroupArgs);
 
       pass.setPipeline(this.pipeline);
@@ -275,7 +331,7 @@ export class DiffusionPass extends SimulationPass {
 /**
  * Computes the divergence of the velocity field
  */
-export class DivergencePass extends SimulationPass {
+export class DivergencePass extends ComputePass<SmokeTextureID> {
   constructor(device: GPUDevice, workgroupSize: number) {
     super(
       {
@@ -288,7 +344,13 @@ export class DivergencePass extends SimulationPass {
           }),
         }),
       },
-      device,
+      device
+    );
+  }
+
+  protected createBindGroupLayout(): GPUBindGroupLayout {
+    return BindLayoutManager.getBindGroupLayout(
+      this.device,
       BindGroupLayoutType.READ_WRITE_UNIFORM
     );
   }
@@ -335,7 +397,7 @@ export class DivergencePass extends SimulationPass {
 /**
  * Solves for pressure using Jacobi iterations to enforce incompressibility
  */
-export class PressurePass extends SimulationPass {
+export class PressurePass extends ComputePass<SmokeTextureID> {
   constructor(device: GPUDevice, workgroupSize: number) {
     super(
       {
@@ -348,51 +410,15 @@ export class PressurePass extends SimulationPass {
           }),
         }),
       },
-      device,
-      BindGroupLayoutType.READ_READ_WRITE_UNIFORM
+      device
     );
   }
 
   protected createBindGroupLayout(): GPUBindGroupLayout {
-    // Special case for pressure - needs r32float output instead of rg32float
-    const cacheKey = `${this.device.label || "device"}_pressure_layout`;
-
-    if (SimulationPass.bindGroupLayouts.has(cacheKey)) {
-      return SimulationPass.bindGroupLayouts.get(cacheKey)!;
-    }
-
-    const layout = this.device.createBindGroupLayout({
-      label: "Pressure Bind Group Layout",
-      entries: [
-        {
-          binding: 0,
-          visibility: GPUShaderStage.COMPUTE,
-          texture: { sampleType: "unfilterable-float", viewDimension: "2d" },
-        },
-        {
-          binding: 1,
-          visibility: GPUShaderStage.COMPUTE,
-          texture: { sampleType: "unfilterable-float", viewDimension: "2d" },
-        },
-        {
-          binding: 2,
-          visibility: GPUShaderStage.COMPUTE,
-          storageTexture: {
-            format: "r32float",
-            access: "write-only",
-            viewDimension: "2d",
-          },
-        },
-        {
-          binding: 3,
-          visibility: GPUShaderStage.COMPUTE,
-          buffer: { type: "uniform" },
-        },
-      ],
-    });
-
-    SimulationPass.bindGroupLayouts.set(cacheKey, layout);
-    return layout;
+    return BindLayoutManager.getBindGroupLayout(
+      this.device,
+      BindGroupLayoutType.PRESSURE
+    );
   }
 
   protected createBindGroup(args: BindGroupArgs<SmokeTextureID>): GPUBindGroup {
@@ -428,12 +454,13 @@ export class PressurePass extends SimulationPass {
     });
   }
 
-  public override async execute(
+  public override execute(
     pass: GPUComputePassEncoder,
     bindGroupArgs: BindGroupArgs<SmokeTextureID>,
-    workgroupCount: number
-  ): Promise<void> {
-    for (let i = 0; i < PRESSURE_ITERATIONS; i++) {
+    workgroupCount: number,
+    iterations: number
+  ): void {
+    for (let i = 0; i < iterations; i++) {
       const bindGroup = this.createBindGroup(bindGroupArgs);
 
       pass.setPipeline(this.pipeline);
@@ -460,7 +487,7 @@ export class PressurePass extends SimulationPass {
 /**
  * Subtracts pressure gradient from velocity to enforce incompressibility
  */
-export class GradientSubtractionPass extends SimulationPass {
+export class GradientSubtractionPass extends ComputePass<SmokeTextureID> {
   constructor(device: GPUDevice, workgroupSize: number) {
     super(
       {
@@ -473,51 +500,16 @@ export class GradientSubtractionPass extends SimulationPass {
           }),
         }),
       },
-      device,
-      BindGroupLayoutType.READ_READ_WRITE_UNIFORM
+      device
     );
   }
 
   protected createBindGroupLayout(): GPUBindGroupLayout {
     // Special case for gradient subtraction - pressure is r32float, velocity/output is rg32float
-    const cacheKey = `${this.device.label || "device"}_gradient_layout`;
-
-    if (SimulationPass.bindGroupLayouts.has(cacheKey)) {
-      return SimulationPass.bindGroupLayouts.get(cacheKey)!;
-    }
-
-    const layout = this.device.createBindGroupLayout({
-      label: "Gradient Subtraction Bind Group Layout",
-      entries: [
-        {
-          binding: 0,
-          visibility: GPUShaderStage.COMPUTE,
-          texture: { sampleType: "unfilterable-float", viewDimension: "2d" }, // pressure (r32float)
-        },
-        {
-          binding: 1,
-          visibility: GPUShaderStage.COMPUTE,
-          texture: { sampleType: "unfilterable-float", viewDimension: "2d" }, // velocity (rg32float)
-        },
-        {
-          binding: 2,
-          visibility: GPUShaderStage.COMPUTE,
-          storageTexture: {
-            format: "rg32float",
-            access: "write-only",
-            viewDimension: "2d",
-          }, // output velocity
-        },
-        {
-          binding: 3,
-          visibility: GPUShaderStage.COMPUTE,
-          buffer: { type: "uniform" },
-        },
-      ],
-    });
-
-    SimulationPass.bindGroupLayouts.set(cacheKey, layout);
-    return layout;
+    return BindLayoutManager.getBindGroupLayout(
+      this.device,
+      BindGroupLayoutType.GRADIENT
+    );
   }
 
   protected createBindGroup(args: BindGroupArgs<SmokeTextureID>): GPUBindGroup {
@@ -565,64 +557,23 @@ export class GradientSubtractionPass extends SimulationPass {
   }
 }
 
-/**
- * Factory class for creating simulation passes
- */
-export class SimulationPassFactory {
-  public static createAdvectionPass(
-    device: GPUDevice,
-    workgroupSize: number
-  ): AdvectionPass {
-    return new AdvectionPass(device, workgroupSize);
-  }
-
-  public static createDiffusionPass(
-    device: GPUDevice,
-    workgroupSize: number
-  ): DiffusionPass {
-    return new DiffusionPass(device, workgroupSize);
-  }
-
-  public static createDivergencePass(
-    device: GPUDevice,
-    workgroupSize: number
-  ): DivergencePass {
-    return new DivergencePass(device, workgroupSize);
-  }
-
-  public static createPressurePass(
-    device: GPUDevice,
-    workgroupSize: number
-  ): PressurePass {
-    return new PressurePass(device, workgroupSize);
-  }
-
-  public static createGradientSubtractionPass(
-    device: GPUDevice,
-    workgroupSize: number
-  ): GradientSubtractionPass {
-    return new GradientSubtractionPass(device, workgroupSize);
-  }
-}
-
-/**
+/*
  * Uniform buffer utilities for creating consistent buffer data
  */
 export class UniformBufferUtils {
   public static createAdvectionUniforms(
     timestep: number,
-    gridScale: number
+    velocityAdvectionFactor: number
   ): Float32Array {
-    return new Float32Array([timestep, 1.0 / gridScale]);
+    return new Float32Array([timestep, velocityAdvectionFactor]);
   }
 
   public static createDiffusionUniforms(
     timestep: number,
-    gridScale: number,
-    viscosity: number
+    diffusionFactor: number
   ): Float32Array {
-    const rdx = 1.0 / gridScale;
-    const alpha = (rdx * rdx) / (viscosity * timestep);
+    const alpha = 1 / diffusionFactor / timestep;
+    // const alpha = () / (viscosity * timestep);
     const rBeta = 1.0 / (4.0 + alpha);
     return new Float32Array([alpha, rBeta]);
   }
@@ -632,9 +583,10 @@ export class UniformBufferUtils {
     return new Float32Array([halfRdx]);
   }
 
-  public static createPressureUniforms(): Float32Array {
-    const alpha = -1.0; // For pressure Poisson equation
-    const rBeta = 0.25; // 1/(4 + alpha) = 1/(4 + (-1)) = 1/3, but we use 0.25 for stability
+  public static createPressureUniforms(gridScale: number): Float32Array {
+    const rdx = 1.0 / gridScale;
+    const alpha = -(rdx * rdx); // For pressure Poisson equation
+    const rBeta = 0.25;
     return new Float32Array([alpha, rBeta]);
   }
 
