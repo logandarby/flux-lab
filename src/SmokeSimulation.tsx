@@ -20,6 +20,13 @@ import {
   SmokeAdvectionPasss,
   SmokeDiffusionPass,
 } from "./passes/SimulationPasses";
+import { usePersistedState } from "./utils/localStorage.utils";
+
+// Configuration types for persistent settings
+export interface SmokeSimulationConfig {
+  shaderMode: ShaderMode;
+  texture: SmokeTextureID;
+}
 
 // Constants
 
@@ -29,7 +36,7 @@ const GRID_SIZE = {
   width: 2 ** 9,
   height: 2 ** 9,
 };
-const GRID_SCALE = 3;
+const GRID_SCALE = 0.8;
 const WORKGROUP_SIZE = 16;
 const WORKGROUP_COUNT = Math.ceil(GRID_SIZE.width / WORKGROUP_SIZE);
 // const VISCOSITY = 1;
@@ -37,7 +44,7 @@ const WORKGROUP_COUNT = Math.ceil(GRID_SIZE.width / WORKGROUP_SIZE);
 const DIFFUSION_FACTOR = 10; // Smaller = slower diffusion
 const VELOCITY_ADVECTION = 10; // Smaller = slower velocity advection
 const SMOKE_ADVECTION = 10;
-const SMOKE_DIFFUSION = 10;
+const SMOKE_DIFFUSION = 10 * 2;
 
 const TIMESTEP = 1.0 / 30.0;
 const DIFFUSION_ITERATIONS = 20;
@@ -47,7 +54,7 @@ const SMOKE_PARTICLE_DIMENSIONS = {
   height: GRID_SIZE.height,
 }; // TODO: Want this to work with arbitrary particle dimensions with advection
 
-const INIT_VELOCITY = [-20, -20]; // TEMP
+const INIT_VELOCITY = [-40, -40]; // TEMP
 const INIT_VELOCITY_SQUARE_SIZE = 2 ** 6;
 
 // Utils
@@ -125,6 +132,30 @@ function initializeTextures(
       bytesPerRow: SMOKE_PARTICLE_DIMENSIONS.width * 4 * 2,
     },
     { ...SMOKE_PARTICLE_DIMENSIONS }
+  );
+
+  // Init pressure texture to all zeros
+  const pressureTexture = textureManager.getCurrentTexture("pressure");
+  const pressureBackTexture = textureManager.getBackTexture("pressure");
+  const initPressureData = Array(GRID_SIZE.width * GRID_SIZE.height).fill(0.0);
+
+  // Initialize both front and back pressure textures
+  device.queue.writeTexture(
+    { texture: pressureTexture },
+    new Float32Array(initPressureData),
+    {
+      bytesPerRow: GRID_SIZE.width * 4, // 1 channel × 4 bytes per 32-bit float
+    },
+    { ...GRID_SIZE }
+  );
+
+  device.queue.writeTexture(
+    { texture: pressureBackTexture },
+    new Float32Array(initPressureData),
+    {
+      bytesPerRow: GRID_SIZE.width * 4,
+    },
+    { ...GRID_SIZE }
   );
 }
 
@@ -274,9 +305,15 @@ class SmokeSimulation {
     this.step({ renderOnly: true });
   }
 
-  // @ts-expect-error TODO: Get rid og this
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  public step({ renderOnly }: { renderOnly: boolean } = { renderOnly: false }) {
+  public step({
+    renderOnly = false,
+    shaderMode = ShaderMode.DENSITY,
+    texture = "smokeDensity",
+  }: {
+    renderOnly?: boolean;
+    shaderMode?: ShaderMode;
+    texture?: SmokeTextureID;
+  } = {}) {
     if (
       !this.resources ||
       !this.textureManager ||
@@ -298,10 +335,7 @@ class SmokeSimulation {
 
     const commandEncoder = this.resources.device.createCommandEncoder();
 
-    // if (!renderOnly) {
-    // TODO: Constant if is temporary
-    // eslint-disable-next-line no-constant-condition
-    if (true) {
+    if (!renderOnly) {
       // Step 1: Advection
       const advectionUniforms = UniformBufferUtils.createAdvectionUniforms(
         TIMESTEP,
@@ -479,8 +513,8 @@ class SmokeSimulation {
         sampler: this.resources.device.createSampler({
           label: "Render Sampler",
         }),
-        shaderMode: ShaderMode.DENSITY,
-        texture: "smokeDensity",
+        shaderMode: shaderMode,
+        texture: texture,
       }
     );
 
@@ -488,7 +522,10 @@ class SmokeSimulation {
     this.resources.device.queue.submit([commandEncoder.finish()]);
   }
 
-  public reset() {
+  public reset(
+    shaderMode: ShaderMode = ShaderMode.DENSITY,
+    texture: SmokeTextureID = "smokeDensity"
+  ) {
     if (!this.resources || !this.textureManager || !this.isInitialized) {
       throw new WebGPUError(
         "Could not reset simulation: Resources not initialized",
@@ -500,7 +537,7 @@ class SmokeSimulation {
     initializeTextures(this.textureManager, this.resources.device);
 
     // Force a render
-    this.step({ renderOnly: true });
+    this.step({ renderOnly: true, shaderMode, texture });
   }
 
   private createUniformBuffer(data: Float32Array, label: string): GPUBuffer {
@@ -521,6 +558,15 @@ function SmokeSimulationComponent() {
   const [isInitialized, setIsInitialized] = useState(false);
   const [isPlaying, setIsPlaying] = useState(false);
   const [initError, setInitError] = useState<string | null>(null);
+  const [selectedMode, setSelectedMode] = usePersistedState<ShaderMode>(
+    "smoke-simulation-shader-mode",
+    ShaderMode.DENSITY
+  );
+  const [selectedTexture, setSelectedTexture] =
+    usePersistedState<SmokeTextureID>(
+      "smoke-simulation-texture",
+      "smokeDensity"
+    );
 
   useEffect(() => {
     const runSimulation = async () => {
@@ -552,7 +598,10 @@ function SmokeSimulationComponent() {
     const animate = () => {
       if (smokeSimulation.current && isPlaying) {
         try {
-          smokeSimulation.current.step();
+          smokeSimulation.current.step({
+            shaderMode: selectedMode,
+            texture: selectedTexture,
+          });
           animationFrameRef.current = requestAnimationFrame(animate);
         } catch (error) {
           console.error("Failed to step simulation:", error);
@@ -569,17 +618,35 @@ function SmokeSimulationComponent() {
         animationFrameRef.current = null;
       }
     };
-  }, [isPlaying, isInitialized]);
+  }, [isPlaying, isInitialized, selectedMode, selectedTexture]);
+
+  // Re-render when visualization mode changes (if not playing)
+  useEffect(() => {
+    if (isInitialized && !isPlaying && smokeSimulation.current) {
+      try {
+        smokeSimulation.current.step({
+          renderOnly: true,
+          shaderMode: selectedMode,
+          texture: selectedTexture,
+        });
+      } catch (error) {
+        console.error("Failed to update visualization:", error);
+      }
+    }
+  }, [selectedMode, selectedTexture, isInitialized, isPlaying]);
 
   const handleStep = useCallback(() => {
     if (smokeSimulation.current && isInitialized) {
       try {
-        smokeSimulation.current.step();
+        smokeSimulation.current.step({
+          shaderMode: selectedMode,
+          texture: selectedTexture,
+        });
       } catch (error) {
         console.error("Failed to step simulation:", error);
       }
     }
-  }, [isInitialized]);
+  }, [isInitialized, selectedMode, selectedTexture]);
 
   const handleRestart = useCallback(async () => {
     if (!smokeSimulation.current || !isInitialized) {
@@ -587,11 +654,63 @@ function SmokeSimulationComponent() {
     }
 
     try {
-      smokeSimulation.current.reset();
+      smokeSimulation.current.reset(selectedMode, selectedTexture);
     } catch (error) {
       console.error("Failed to restart simulation:", error);
     }
-  }, [isInitialized]);
+  }, [isInitialized, selectedMode, selectedTexture]);
+
+  // Visualization mode options
+  const visualizationModes = [
+    {
+      value: ShaderMode.DENSITY,
+      label: "Smoke Density",
+      texture: "smokeDensity" as SmokeTextureID,
+    },
+    {
+      value: ShaderMode.VELOCITY,
+      label: "Velocity Field",
+      texture: "velocity" as SmokeTextureID,
+    },
+    {
+      value: ShaderMode.PRESSURE,
+      label: "Pressure Field",
+      texture: "pressure" as SmokeTextureID,
+    },
+  ];
+
+  const handleModeChange = useCallback(
+    (event: React.ChangeEvent<HTMLSelectElement>) => {
+      const mode = parseInt(event.target.value) as ShaderMode;
+      const modeOption = visualizationModes.find((m) => m.value === mode);
+      if (modeOption) {
+        setSelectedMode(mode);
+        setSelectedTexture(modeOption.texture);
+      }
+    },
+    [setSelectedMode, setSelectedTexture]
+  );
+
+  // Custom visualization mode dropdown
+  const visualizationControl = (
+    <div className="w-full">
+      <label className="block text-sm font-medium text-gray-700 mb-2">
+        Visualization Mode
+      </label>
+      <select
+        value={selectedMode}
+        onChange={handleModeChange}
+        disabled={!isInitialized}
+        className="w-full px-3 py-2 text-sm border border-gray-300 rounded-md bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent disabled:bg-gray-100 disabled:cursor-not-allowed"
+      >
+        {visualizationModes.map((mode) => (
+          <option key={mode.value} value={mode.value}>
+            {mode.label}
+          </option>
+        ))}
+      </select>
+    </div>
+  );
 
   return (
     <div className="p-5">
@@ -601,10 +720,6 @@ function SmokeSimulationComponent() {
           <h2 className="text-2xl font-bold text-gray-800 mb-2">
             Smoke Simulation
           </h2>
-          <p className="text-gray-600 text-sm max-w-md">
-            WebGPU-based fluid simulation with advection and divergence
-            computation
-          </p>
         </div>
 
         {initError && (
@@ -633,6 +748,7 @@ function SmokeSimulationComponent() {
             onStep={handleStep}
             onRestart={handleRestart}
             title="Smoke Simulation"
+            customControls={visualizationControl}
           />
         </div>
       </div>

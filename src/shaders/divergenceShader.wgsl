@@ -27,6 +27,6 @@ fn compute_main(
     let down = textureLoad(velocity_in, coord + vec2<i32>(0, 1), 0);
     let up = textureLoad(velocity_in, coord + vec2<i32>(0, -1), 0);
 
-    let divergence = (right.x - left.x + up.y - down.y) * input.half_rdx;
+    let divergence = (right.x - left.x + down.y - up.y) * input.half_rdx;
     textureStore(divergence_out, coord, vec4f(divergence, 0.0, 0.0, 0.0));
 }

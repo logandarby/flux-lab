@@ -68,11 +68,6 @@ function TestsPage() {
           <h1 className="text-4xl font-bold text-gray-900 mb-4">
             Fluid Simulation Tests
           </h1>
-          <p className="text-lg text-gray-600 max-w-2xl mx-auto">
-            Collection of WebGPU-based fluid simulation tests and experiments.
-            Each test focuses on a specific aspect of computational fluid
-            dynamics.
-          </p>
         </div>
 
         <div className="grid gap-6 md:grid-cols-2">
