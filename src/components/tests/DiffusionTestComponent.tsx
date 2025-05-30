@@ -9,10 +9,10 @@ import {
   initializeWebGPU,
   injectShaderVariables,
 } from "@/utils/webgpu.utils";
-import { RenderTexturePass } from "@/SmokeSimulation";
 import type { SmokeTextureID } from "@/SmokeSimulation";
 import { ComputePass, type BindGroupArgs } from "@/utils/ComputePass";
 import jacobiIterationShader from "../../shaders/jacobiIteration.wgsl?raw";
+import { RenderPass, ShaderMode } from "@/utils/RenderPass";
 
 const GRID_SIZE = 16; // 16x16 grid
 const WORKGROUP_SIZE = 8;
@@ -176,7 +176,7 @@ class DiffusionTestSimulation {
   private textureManager: TextureManager<SmokeTextureID> | null = null;
   private sampler: GPUSampler | null = null;
   private diffusionPass: DiffusionPass | null = null; // Reusing AdvectionPass for now
-  private renderingPass: RenderTexturePass | null = null;
+  private renderingPass: RenderPass<SmokeTextureID> | null = null;
 
   public async initialize(canvasRef: React.RefObject<HTMLCanvasElement>) {
     if (!canvasRef.current) {
@@ -221,9 +221,8 @@ class DiffusionTestSimulation {
       label: "Texture Shader",
       code: textureShader,
     });
-    this.renderingPass = new RenderTexturePass(
+    this.renderingPass = new RenderPass<SmokeTextureID>(
       {
-        outputTextureName: "velocity",
         name: "Diffusion Test Rendering",
         vertex: {
           module: textureShaderModule,
@@ -312,6 +311,8 @@ class DiffusionTestSimulation {
       {
         sampler: this.sampler!,
         textureManager: this.textureManager,
+        shaderMode: ShaderMode.VELOCITY,
+        texture: "velocity",
       }
     );
 

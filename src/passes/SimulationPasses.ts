@@ -3,8 +3,8 @@ import { injectShaderVariables } from "../utils/webgpu.utils";
 import type { SmokeTextureID } from "../SmokeSimulation";
 
 import advectionShaderTemplate from "../shaders/advectionShader.wgsl?raw";
-import jacobiIterationShader from "../shaders/jacobiIteration.wgsl?raw";
-import pressureJacobiShader from "../shaders/pressureJacobi.wgsl?raw";
+import jacobiIterationShaderTemplate from "../shaders/jacobiIteration.wgsl?raw";
+// import pressureJacobiShader from "../shaders/pressureJacobi.wgsl?raw";
 import divergenceShaderTemplate from "../shaders/divergenceShader.wgsl?raw";
 import gradientSubtractionShaderTemplate from "../shaders/gradientSubtractionShader.wgsl?raw";
 
@@ -249,8 +249,9 @@ export class DiffusionPass extends ComputePass<SmokeTextureID> {
         entryPoint: "compute_main",
         shader: device.createShaderModule({
           label: "Diffusion Shader",
-          code: injectShaderVariables(jacobiIterationShader, {
+          code: injectShaderVariables(jacobiIterationShaderTemplate, {
             WORKGROUP_SIZE: workgroupSize,
+            FORMAT: "rg32float",
           }),
         }),
       },
@@ -405,8 +406,9 @@ export class PressurePass extends ComputePass<SmokeTextureID> {
         entryPoint: "compute_main",
         shader: device.createShaderModule({
           label: "Pressure Shader",
-          code: injectShaderVariables(pressureJacobiShader, {
+          code: injectShaderVariables(jacobiIterationShaderTemplate, {
             WORKGROUP_SIZE: workgroupSize,
+            FORMAT: "r32float",
           }),
         }),
       },

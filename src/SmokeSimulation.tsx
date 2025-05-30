@@ -8,7 +8,7 @@ import {
   type WebGPUResources,
 } from "./utils/webgpu.utils";
 import { TextureManager } from "./utils/TextureManager";
-import { RenderPass, type RenderPassConfig } from "./utils/RenderPass";
+import { RenderPass, ShaderMode } from "./utils/RenderPass";
 import SimulationControls from "./components/ui/SimulationControls";
 import {
   AdvectionPass,
@@ -40,12 +40,6 @@ const INIT_VELOCITY_SQUARE_SIZE = 2 ** 6;
 // Utils
 
 export type SmokeTextureID = "divergence" | "velocity" | "pressure";
-
-export class RenderTexturePass extends RenderPass<SmokeTextureID> {
-  constructor(config: RenderPassConfig<SmokeTextureID>, device: GPUDevice) {
-    super(config, device);
-  }
-}
 
 function initializeTextures(
   textureManager: TextureManager<SmokeTextureID>,
@@ -80,7 +74,7 @@ class SmokeSimulation {
   private divergencePass: DivergencePass | null = null;
   private pressurePass: PressurePass | null = null;
   private gradientSubtractionPass: GradientSubtractionPass | null = null;
-  private renderingPass: RenderTexturePass | null = null;
+  private renderingPass: RenderPass<SmokeTextureID> | null = null;
   private isInitialized = false;
 
   public async initialize(canvasRef: React.RefObject<HTMLCanvasElement>) {
@@ -159,9 +153,8 @@ class SmokeSimulation {
       label: "Texture Shader",
       code: textureShader,
     });
-    this.renderingPass = new RenderTexturePass(
+    this.renderingPass = new RenderPass<SmokeTextureID>(
       {
-        outputTextureName: "velocity",
         name: "Texture Rendering",
         vertex: {
           module: textureShaderModule,
@@ -351,6 +344,8 @@ class SmokeSimulation {
         sampler: this.resources.device.createSampler({
           label: "Render Sampler",
         }),
+        shaderMode: ShaderMode.VELOCITY,
+        texture: "velocity",
       }
     );
 

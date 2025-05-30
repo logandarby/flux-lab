@@ -1,15 +1,16 @@
 import type { TextureManager } from "./TextureManager";
 
-export interface RenderPassConfig<TextureID extends string | number> {
+export interface RenderPassConfig {
   name: string;
   vertex: GPUVertexState;
   fragment: GPUFragmentState;
-  outputTextureName: TextureID;
 }
 
 export interface RenderPassBindArgs<TextureID extends string | number> {
   textureManager: TextureManager<TextureID>;
   sampler: GPUSampler;
+  shaderMode: ShaderMode;
+  texture: TextureID;
 }
 
 export interface RenderPassDrawConfig {
@@ -17,12 +18,20 @@ export interface RenderPassDrawConfig {
   instanceCount?: number;
 }
 
-export abstract class RenderPass<TextureID extends string | number> {
+// NOTE Must be kept in sync with texture shader
+export enum ShaderMode {
+  VELOCITY = 0,
+  PRESSURE = 1,
+}
+
+export class RenderPass<TextureID extends string | number> {
   protected readonly pipeline: GPURenderPipeline;
   protected readonly bindGroupLayout: GPUBindGroupLayout;
+  protected readonly uniformBuffer: GPUBuffer;
+  protected readonly currentShaderMode: ShaderMode | null = null;
 
   constructor(
-    protected readonly config: RenderPassConfig<TextureID>,
+    protected readonly config: RenderPassConfig,
     protected readonly device: GPUDevice
   ) {
     this.bindGroupLayout = this.createBindGroupLayout();
@@ -34,6 +43,11 @@ export abstract class RenderPass<TextureID extends string | number> {
       }),
       vertex: this.config.vertex,
       fragment: this.config.fragment,
+    });
+    this.uniformBuffer = this.device.createBuffer({
+      label: `${this.config.name} Uniform Buffer`,
+      size: 4, // 1 float
+      usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
     });
   }
 
@@ -57,26 +71,46 @@ export abstract class RenderPass<TextureID extends string | number> {
             type: "non-filtering",
           },
         },
+        {
+          binding: 2,
+          visibility: GPUShaderStage.FRAGMENT,
+          buffer: {
+            type: "uniform",
+          },
+        },
       ],
     });
   }
   protected createBindGroup({
     textureManager,
     sampler,
+    shaderMode,
+    texture,
   }: RenderPassBindArgs<TextureID>): GPUBindGroup {
+    if (shaderMode !== this.currentShaderMode) {
+      this.device.queue.writeBuffer(
+        this.uniformBuffer,
+        0,
+        new Uint32Array([shaderMode])
+      );
+    }
     return this.device.createBindGroup({
       label: "Smoke Texture Bind Group",
       layout: this.bindGroupLayout,
       entries: [
         {
           binding: 0,
-          resource: textureManager
-            .getCurrentTexture(this.config.outputTextureName)
-            .createView(),
+          resource: textureManager.getCurrentTexture(texture).createView(),
         },
         {
           binding: 1,
           resource: sampler,
+        },
+        {
+          binding: 2,
+          resource: {
+            buffer: this.uniformBuffer,
+          },
         },
       ],
     });

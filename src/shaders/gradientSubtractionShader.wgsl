@@ -22,10 +22,10 @@ fn compute_main(
         return;
     }
 
-    let left    = textureLoad(pressure_in, coord + vec2<i32>(-1,  0), 0);
-    let right   = textureLoad(pressure_in, coord + vec2<i32>( 1,  0), 0);
-    let up      = textureLoad(pressure_in, coord + vec2<i32>( 0, -1), 0);
-    let down    = textureLoad(pressure_in, coord + vec2<i32>( 0,  1), 0);
+    let left    = textureLoad(pressure_in, coord - vec2<i32>(1, 0), 0);
+    let right   = textureLoad(pressure_in, coord + vec2<i32>(1, 0), 0);
+    let up      = textureLoad(pressure_in, coord - vec2<i32>(0, 1), 0);
+    let down    = textureLoad(pressure_in, coord + vec2<i32>(0, 1), 0);
 
     let pressure_gradient = vec2<f32>(right.x - left.x, up.x - down.x) * input.half_rdx;
     let velocity = textureLoad(velocity_in, coord, 0);

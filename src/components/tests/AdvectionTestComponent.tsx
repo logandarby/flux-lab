@@ -9,9 +9,10 @@ import {
   initializeWebGPU,
   injectShaderVariables,
 } from "@/utils/webgpu.utils";
-import { RenderTexturePass, type SmokeTextureID } from "@/SmokeSimulation";
+import { type SmokeTextureID } from "@/SmokeSimulation";
 import { ComputePass, type BindGroupArgs } from "@/utils/ComputePass";
 import advectionShaderTemplate from "../../shaders/advectionShader.wgsl?raw";
+import { RenderPass, ShaderMode } from "@/utils/RenderPass";
 
 const GRID_SIZE = 16; // 8x8 grid
 const WORKGROUP_SIZE = 8;
@@ -192,7 +193,7 @@ class AdvectionTestSimulation {
   private sampler: GPUSampler | null = null;
   private textureManager: TextureManager<AdvectionTextureID> | null = null;
   private advectionPass: AdvectionPass | null = null;
-  private renderingPass: RenderTexturePass | null = null;
+  private renderingPass: RenderPass<SmokeTextureID> | null = null;
 
   public async initialize(
     canvasRef: React.RefObject<HTMLCanvasElement>,
@@ -241,9 +242,8 @@ class AdvectionTestSimulation {
       label: "Texture Shader",
       code: textureShader,
     });
-    this.renderingPass = new RenderTexturePass(
+    this.renderingPass = new RenderPass<SmokeTextureID>(
       {
-        outputTextureName: "velocity",
         name: "Advection Test Rendering",
         vertex: {
           module: textureShaderModule,
@@ -333,6 +333,8 @@ class AdvectionTestSimulation {
       {
         sampler: this.sampler!,
         textureManager: this.textureManager,
+        shaderMode: ShaderMode.VELOCITY,
+        texture: "velocity",
       }
     );
 
