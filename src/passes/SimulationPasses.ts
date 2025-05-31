@@ -10,6 +10,7 @@ import gradientSubtractionShaderTemplate from "../shaders/gradientSubtractionSha
 import boundaryConditionsShaderTemplate from "../shaders/boundaryConditionsShader.wgsl?raw";
 import addSmokeShaderTemplate from "../shaders/addSmokeShader.wgsl?raw";
 import addVelocityShaderTemplate from "../shaders/addVelocityShader.wgsl?raw";
+import dissipationShaderTemplate from "../shaders/dissipationShader.wgsl?raw";
 
 // Boundary condition types
 export enum BoundaryType {
@@ -946,6 +947,12 @@ export class UniformBufferUtils {
       intensity,
     ]);
   }
+
+  public static createDissipationUniforms(
+    dissipationFactor: number
+  ): Float32Array {
+    return new Float32Array([dissipationFactor]);
+  }
 }
 
 /**
@@ -1075,6 +1082,160 @@ export class AddVelocityPass extends ComputePass<SmokeTextureID> {
 
     return this.device.createBindGroup({
       label: "Add Velocity Bind Group",
+      layout: this.bindGroupLayout,
+      entries: [
+        {
+          binding: 0,
+          resource: args
+            .textureManager!.getCurrentTexture("velocity")
+            .createView(),
+        },
+        {
+          binding: 1,
+          resource: args
+            .textureManager!.getBackTexture("velocity")
+            .createView(),
+        },
+        {
+          binding: 2,
+          resource: { buffer: args.uniformBuffer! },
+        },
+      ],
+    });
+  }
+}
+
+/**
+ * Applies dissipation to smoke density, gradually reducing it over time
+ */
+export class SmokeDissipationPass extends ComputePass<SmokeTextureID> {
+  constructor(device: GPUDevice, workgroupSize: number) {
+    super(
+      {
+        name: "Smoke Dissipation",
+        entryPoint: "compute_main",
+        shader: device.createShaderModule({
+          label: "Smoke Dissipation Shader",
+          code: injectShaderVariables(dissipationShaderTemplate, {
+            WORKGROUP_SIZE: workgroupSize,
+            FORMAT: "r32float",
+            CHANNELS: 1,
+          }),
+        }),
+      },
+      device
+    );
+  }
+
+  protected createBindGroupLayout(): GPUBindGroupLayout {
+    return this.device.createBindGroupLayout({
+      label: "Smoke Dissipation Bind Group Layout",
+      entries: [
+        {
+          binding: 0,
+          visibility: GPUShaderStage.COMPUTE,
+          texture: { sampleType: "unfilterable-float", viewDimension: "2d" },
+        },
+        {
+          binding: 1,
+          visibility: GPUShaderStage.COMPUTE,
+          storageTexture: {
+            format: "r32float",
+            access: "write-only",
+            viewDimension: "2d",
+          },
+        },
+        {
+          binding: 2,
+          visibility: GPUShaderStage.COMPUTE,
+          buffer: { type: "uniform" },
+        },
+      ],
+    });
+  }
+
+  protected createBindGroup(args: BindGroupArgs<SmokeTextureID>): GPUBindGroup {
+    this.validateArgs(args, ["textureManager", "uniformBuffer"]);
+
+    return this.device.createBindGroup({
+      label: "Smoke Dissipation Bind Group",
+      layout: this.bindGroupLayout,
+      entries: [
+        {
+          binding: 0,
+          resource: args
+            .textureManager!.getCurrentTexture("smokeDensity")
+            .createView(),
+        },
+        {
+          binding: 1,
+          resource: args
+            .textureManager!.getBackTexture("smokeDensity")
+            .createView(),
+        },
+        {
+          binding: 2,
+          resource: { buffer: args.uniformBuffer! },
+        },
+      ],
+    });
+  }
+}
+
+/**
+ * Applies dissipation to velocity field, gradually reducing it over time
+ */
+export class VelocityDissipationPass extends ComputePass<SmokeTextureID> {
+  constructor(device: GPUDevice, workgroupSize: number) {
+    super(
+      {
+        name: "Velocity Dissipation",
+        entryPoint: "compute_main",
+        shader: device.createShaderModule({
+          label: "Velocity Dissipation Shader",
+          code: injectShaderVariables(dissipationShaderTemplate, {
+            WORKGROUP_SIZE: workgroupSize,
+            FORMAT: "rg32float",
+            CHANNELS: 2,
+          }),
+        }),
+      },
+      device
+    );
+  }
+
+  protected createBindGroupLayout(): GPUBindGroupLayout {
+    return this.device.createBindGroupLayout({
+      label: "Velocity Dissipation Bind Group Layout",
+      entries: [
+        {
+          binding: 0,
+          visibility: GPUShaderStage.COMPUTE,
+          texture: { sampleType: "unfilterable-float", viewDimension: "2d" },
+        },
+        {
+          binding: 1,
+          visibility: GPUShaderStage.COMPUTE,
+          storageTexture: {
+            format: "rg32float",
+            access: "write-only",
+            viewDimension: "2d",
+          },
+        },
+        {
+          binding: 2,
+          visibility: GPUShaderStage.COMPUTE,
+          buffer: { type: "uniform" },
+        },
+      ],
+    });
+  }
+
+  protected createBindGroup(args: BindGroupArgs<SmokeTextureID>): GPUBindGroup {
+    this.validateArgs(args, ["textureManager", "uniformBuffer"]);
+
+    return this.device.createBindGroup({
+      label: "Velocity Dissipation Bind Group",
       layout: this.bindGroupLayout,
       entries: [
         {

@@ -20,6 +20,8 @@ import {
   BoundaryType,
   AddSmokePass,
   AddVelocityPass,
+  SmokeDissipationPass,
+  VelocityDissipationPass,
 } from "./passes/SimulationPasses";
 
 // Configuration types for persistent settings
@@ -30,7 +32,8 @@ export interface SmokeSimulationConfig {
 
 // Constants
 
-// TODO: Refactor into its own file-- maybe let them be modified.
+// Alternate setting
+
 export const GRID_SIZE = {
   width: 2 ** 9,
   height: 2 ** 9,
@@ -44,7 +47,8 @@ const DIFFUSION_FACTOR = 10; // Smaller = slower diffusion
 const VELOCITY_ADVECTION = 10; // Smaller = slower velocity advection
 const SMOKE_ADVECTION = 20;
 const SMOKE_DIFFUSION = 1;
-// const DISSIPATION = 0.9999;
+const SMOKE_DISSIPATION_FACTOR = 0.99; // Multiplication factor for smoke density each frame
+const VELOCITY_DISSIPATION_FACTOR = 0.995; // Similary for velocity magnitude
 
 // Interaction constants
 const INTERACTION_RADIUS = 20; // Radius of effect when adding smoke/velocity
@@ -57,7 +61,39 @@ const PRESSURE_ITERATIONS = 100;
 const SMOKE_PARTICLE_DIMENSIONS = {
   width: GRID_SIZE.width,
   height: GRID_SIZE.height,
-}; // TODO: Want this to work with arbitrary particle dimensions with advection
+};
+
+// TODO: Refactor into its own file-- maybe let them be modified.
+// export const GRID_SIZE = {
+//   width: 2 ** 9,
+//   height: 2 ** 9,
+// };
+// const GRID_SCALE = 0.8;
+// const WORKGROUP_SIZE = 16;
+// const WORKGROUP_COUNT = Math.ceil(GRID_SIZE.width / WORKGROUP_SIZE);
+// // const VISCOSITY = 1;
+
+// const DIFFUSION_FACTOR = 1; // Smaller = slower diffusion
+// const VELOCITY_ADVECTION = 10; // Smaller = slower velocity advection
+// const SMOKE_ADVECTION = 20;
+// const SMOKE_DIFFUSION = 1;
+
+// // Interaction constants
+// const INTERACTION_RADIUS = 20; // Radius of splat when adding smoke/velocity
+// const SMOKE_INTENSITY = 0.8; // Intensity of smoke when clicking
+// const VELOCITY_INTENSITY = 4.0; // Intensity multiplier for velocity when dragging
+
+// // Dissipation constant - higher value means slower dissipation (closer to 1.0)
+// const SMOKE_DISSIPATION_FACTOR = 0.99; // Multiplication factor for smoke density each frame
+// const VELOCITY_DISSIPATION_FACTOR = 0.995; // Similary for velocity magnitude
+
+// const TIMESTEP = 1.0 / 60.0;
+// const DIFFUSION_ITERATIONS = 40;
+// const PRESSURE_ITERATIONS = 100;
+// const SMOKE_PARTICLE_DIMENSIONS = {
+//   width: GRID_SIZE.width,
+//   height: GRID_SIZE.height,
+// }; // TODO: Want this to work with arbitrary particle dimensions with advection
 
 // Utils
 
@@ -152,6 +188,8 @@ class SmokeSimulation {
   private advectionPass: VelocityAdvectionPass | null = null;
   private smokeAdvectionPass: SmokeAdvectionPasss | null = null;
   private smokeDiffusionPass: SmokeDiffusionPass | null = null;
+  private smokeDissipationPass: SmokeDissipationPass | null = null;
+  private velocityDissipationPass: VelocityDissipationPass | null = null;
   private diffusionPass: DiffusionPass | null = null;
   private divergencePass: DivergencePass | null = null;
   private pressurePass: PressurePass | null = null;
@@ -250,6 +288,14 @@ class SmokeSimulation {
       this.resources.device,
       WORKGROUP_SIZE
     );
+    this.smokeDissipationPass = new SmokeDissipationPass(
+      this.resources.device,
+      WORKGROUP_SIZE
+    );
+    this.velocityDissipationPass = new VelocityDissipationPass(
+      this.resources.device,
+      WORKGROUP_SIZE
+    );
     this.diffusionPass = new DiffusionPass(
       this.resources.device,
       WORKGROUP_SIZE
@@ -325,6 +371,8 @@ class SmokeSimulation {
       !this.gradientSubtractionPass ||
       !this.smokeAdvectionPass ||
       !this.smokeDiffusionPass ||
+      !this.smokeDissipationPass ||
+      !this.velocityDissipationPass ||
       !this.boundaryConditionsPass ||
       !this.addSmokePass ||
       !this.addVelocityPass ||
@@ -497,6 +545,27 @@ class SmokeSimulation {
       velocityBoundaryPassEncoder.end();
       this.textureManager.swap("velocity");
 
+      // Velocity Dissipation Pass - Apply dissipation to gradually reduce velocity
+      const velocityDissipationBuffer = this.createUniformBuffer(
+        UniformBufferUtils.createDissipationUniforms(
+          VELOCITY_DISSIPATION_FACTOR
+        ),
+        "Velocity Dissipation UBO"
+      );
+      const velocityDissipationPassEncoder = commandEncoder.beginComputePass({
+        label: "Velocity Dissipation Compute Pass",
+      });
+      this.velocityDissipationPass.execute(
+        velocityDissipationPassEncoder,
+        {
+          textureManager: this.textureManager,
+          uniformBuffer: velocityDissipationBuffer,
+        },
+        WORKGROUP_COUNT
+      );
+      velocityDissipationPassEncoder.end();
+      this.textureManager.swap("velocity");
+
       // Smoke Advection Pass
       const smokeAdvectionBuffer = this.createUniformBuffer(
         UniformBufferUtils.createAdvectionUniforms(TIMESTEP, SMOKE_ADVECTION),
@@ -556,6 +625,25 @@ class SmokeSimulation {
     smokeDiffusionPassEncoder.end();
     this.textureManager.swap("smokeDensity");
 
+    // Smoke Dissipation Pass
+    const smokeDissipationBuffer = this.createUniformBuffer(
+      UniformBufferUtils.createDissipationUniforms(SMOKE_DISSIPATION_FACTOR),
+      "Smoke Dissipation UBO"
+    );
+    const smokeDissipationPassEncoder = commandEncoder.beginComputePass({
+      label: "Smoke Density Dissipation Compute Pass",
+    });
+    this.smokeDissipationPass.execute(
+      smokeDissipationPassEncoder,
+      {
+        textureManager: this.textureManager,
+        uniformBuffer: smokeDissipationBuffer,
+      },
+      WORKGROUP_COUNT
+    );
+    smokeDissipationPassEncoder.end();
+    this.textureManager.swap("smokeDensity");
+
     // Render Pass
     const renderPassEncoder = commandEncoder.beginRenderPass({
       label: "Texture Render Pass",
@@ -568,7 +656,14 @@ class SmokeSimulation {
         },
       ],
     });
-
+    this.renderingPass.writeToUniformBuffer({
+      shaderMode,
+      noise: {
+        mean: 0,
+        stddev: 0.05,
+        offsets: [Math.random(), Math.random(), Math.random()],
+      },
+    });
     this.renderingPass.execute(
       renderPassEncoder,
       {
@@ -579,7 +674,6 @@ class SmokeSimulation {
         sampler: this.resources.device.createSampler({
           label: "Render Sampler",
         }),
-        shaderMode: shaderMode,
         texture: texture,
       }
     );

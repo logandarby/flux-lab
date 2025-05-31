@@ -9,8 +9,18 @@ export interface RenderPassConfig {
 export interface RenderPassBindArgs<TextureID extends string | number> {
   textureManager: TextureManager<TextureID>;
   sampler: GPUSampler;
-  shaderMode: ShaderMode;
   texture: TextureID;
+}
+
+interface NoiseArguments {
+  stddev: number;
+  mean: number;
+  offsets: [number, number, number];
+}
+
+export interface RenderUniformWriteArgs {
+  shaderMode: ShaderMode;
+  noise: NoiseArguments;
 }
 
 export interface RenderPassDrawConfig {
@@ -29,7 +39,6 @@ export class RenderPass<TextureID extends string | number> {
   protected readonly pipeline: GPURenderPipeline;
   protected readonly bindGroupLayout: GPUBindGroupLayout;
   protected readonly uniformBuffer: GPUBuffer;
-  protected readonly currentShaderMode: ShaderMode | null = null;
 
   constructor(
     protected readonly config: RenderPassConfig,
@@ -47,7 +56,7 @@ export class RenderPass<TextureID extends string | number> {
     });
     this.uniformBuffer = this.device.createBuffer({
       label: `${this.config.name} Uniform Buffer`,
-      size: 4, // 1 float
+      size: 8 * 4, // 1 unsigned int + 5 floats
       usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
     });
   }
@@ -82,19 +91,12 @@ export class RenderPass<TextureID extends string | number> {
       ],
     });
   }
+
   protected createBindGroup({
     textureManager,
     sampler,
-    shaderMode,
     texture,
   }: RenderPassBindArgs<TextureID>): GPUBindGroup {
-    if (shaderMode !== this.currentShaderMode) {
-      this.device.queue.writeBuffer(
-        this.uniformBuffer,
-        0,
-        new Uint32Array([shaderMode])
-      );
-    }
     return this.device.createBindGroup({
       label: "Smoke Texture Bind Group",
       layout: this.bindGroupLayout,
@@ -115,6 +117,22 @@ export class RenderPass<TextureID extends string | number> {
         },
       ],
     });
+  }
+
+  public writeToUniformBuffer({
+    noise,
+    shaderMode,
+  }: RenderUniformWriteArgs): void {
+    this.device.queue.writeBuffer(
+      this.uniformBuffer,
+      0,
+      new Uint32Array([shaderMode])
+    );
+    this.device.queue.writeBuffer(
+      this.uniformBuffer,
+      4,
+      new Float32Array([noise.stddev, noise.mean, ...noise.offsets])
+    );
   }
 
   public execute(
