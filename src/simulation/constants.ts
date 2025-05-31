@@ -1,4 +1,4 @@
-import type { ShaderMode } from "./utils/RenderPass";
+import type { ShaderMode } from "@/utils/RenderPass";
 
 // Configuration types for persistent settings
 export interface SmokeSimulationConfig {
@@ -115,7 +115,7 @@ export const SIMULATION_CONSTANTS: SimulationConstants = {
   },
 
   physics: {
-    timestep: 1.0 / 30.0,
+    timestep: 1.0 / 60.0,
     diffusionFactor: 1, // Smaller = slower diffusion
     velocityAdvection: 10, // Smaller = slower velocity advection
     smokeAdvection: 20,
@@ -136,12 +136,7 @@ export const SIMULATION_CONSTANTS: SimulationConstants = {
   },
 
   particles: {
-    get smokeDimensions() {
-      return {
-        width: SIMULATION_CONSTANTS.grid.size.width,
-        height: SIMULATION_CONSTANTS.grid.size.height,
-      };
-    },
+    smokeDimensions: { width: 2 ** 9, height: 2 ** 9 }, // Match the grid size
   },
 };
 

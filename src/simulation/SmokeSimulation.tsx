@@ -46,97 +46,70 @@ function initializeTextures(
   textureManager: TextureManager<SmokeTextureID>,
   device: GPUDevice
 ): void {
-  // Initialize velocity texture
+  const gridSize = SIMULATION_CONSTANTS.grid.size;
+  const particleSize = SIMULATION_CONSTANTS.particles.smokeDimensions;
+  const totalGridPixels = gridSize.width * gridSize.height;
+  const totalParticlePixels = particleSize.width * particleSize.height;
+
+  // Pre-allocate buffers to reduce memory allocations
+  const velocityData = new Float32Array(totalGridPixels * 2); // 2 channels
+  const smokeDensityData = new Float32Array(totalGridPixels); // 1 channel (already zeros)
+  const pressureData = new Float32Array(totalGridPixels); // 1 channel (already zeros)
+  const particlePositionData = new Float32Array(totalParticlePixels * 2); // 2 channels
+
+  // Initialize particle positions efficiently
+  for (let y = 0; y < particleSize.height; y++) {
+    for (let x = 0; x < particleSize.width; x++) {
+      const index = (x + y * particleSize.width) * 2;
+      particlePositionData[index] = (x / particleSize.width) * gridSize.width;
+      particlePositionData[index + 1] =
+        (y / particleSize.height) * gridSize.height;
+    }
+  }
+
+  // Write all textures
   const velocityTexture = textureManager.getCurrentTexture("velocity");
-  const velocityData = Array(
-    SIMULATION_CONSTANTS.grid.size.width * SIMULATION_CONSTANTS.grid.size.height
-  ).fill([0.0, 0.0]);
   device.queue.writeTexture(
     { texture: velocityTexture },
-    new Float32Array(velocityData.flat()),
-    {
-      bytesPerRow: SIMULATION_CONSTANTS.grid.size.width * 2 * 4, // 2 channels × 4 bytes per 32-bit float
-    },
-    { ...SIMULATION_CONSTANTS.grid.size }
+    velocityData,
+    { bytesPerRow: gridSize.width * 2 * 4 },
+    gridSize
   );
 
-  // Initialize smoke density texture
   const smokeDensityTexture = textureManager.getCurrentTexture("smokeDensity");
   device.queue.writeTexture(
     { texture: smokeDensityTexture },
-    new Float32Array(
-      Array(
-        SIMULATION_CONSTANTS.grid.size.width *
-          SIMULATION_CONSTANTS.grid.size.height
-      ).fill(0)
-    ),
-    {
-      bytesPerRow: SIMULATION_CONSTANTS.grid.size.width * 4,
-    },
-    { ...SIMULATION_CONSTANTS.grid.size }
+    smokeDensityData,
+    { bytesPerRow: gridSize.width * 4 },
+    gridSize
   );
 
-  // Initialize smoke particle locations
   const smokeParticlePositionsTexture = textureManager.getCurrentTexture(
     "smokeParticlePosition"
   );
-  const initSmokePositionsData = Array(
-    SIMULATION_CONSTANTS.particles.smokeDimensions.width *
-      SIMULATION_CONSTANTS.particles.smokeDimensions.height
-  ).fill([0, 0]);
-  for (
-    let x = 0;
-    x < SIMULATION_CONSTANTS.particles.smokeDimensions.width;
-    x++
-  ) {
-    for (
-      let y = 0;
-      y < SIMULATION_CONSTANTS.particles.smokeDimensions.height;
-      y++
-    ) {
-      initSmokePositionsData[
-        x + y * SIMULATION_CONSTANTS.particles.smokeDimensions.width
-      ] = [
-        (x / SIMULATION_CONSTANTS.particles.smokeDimensions.width) *
-          SIMULATION_CONSTANTS.grid.size.width,
-        (y / SIMULATION_CONSTANTS.particles.smokeDimensions.height) *
-          SIMULATION_CONSTANTS.grid.size.height,
-      ];
-    }
-  }
   device.queue.writeTexture(
     { texture: smokeParticlePositionsTexture },
-    new Float32Array(initSmokePositionsData.flat()),
-    {
-      bytesPerRow: SIMULATION_CONSTANTS.particles.smokeDimensions.width * 4 * 2,
-    },
-    { ...SIMULATION_CONSTANTS.particles.smokeDimensions }
+    particlePositionData,
+    { bytesPerRow: particleSize.width * 4 * 2 },
+    particleSize
   );
 
-  // Initialize pressure textures to zero
+  // Initialize pressure textures
   const pressureTexture = textureManager.getCurrentTexture("pressure");
   const pressureBackTexture = textureManager.getBackTexture("pressure");
-  const initPressureData = Array(
-    SIMULATION_CONSTANTS.grid.size.width * SIMULATION_CONSTANTS.grid.size.height
-  ).fill(0.0);
 
-  // Initialize both front and back pressure textures
   device.queue.writeTexture(
     { texture: pressureTexture },
-    new Float32Array(initPressureData),
-    {
-      bytesPerRow: SIMULATION_CONSTANTS.grid.size.width * 4, // 1 channel × 4 bytes per 32-bit float
-    },
-    { ...SIMULATION_CONSTANTS.grid.size }
+    pressureData,
+    { bytesPerRow: gridSize.width * 4 },
+    gridSize
   );
 
   device.queue.writeTexture(
     { texture: pressureBackTexture },
-    new Float32Array(initPressureData),
-    {
-      bytesPerRow: SIMULATION_CONSTANTS.grid.size.width * 4,
-    },
-    { ...SIMULATION_CONSTANTS.grid.size }
+    pressureData,
+    { bytesPerRow: gridSize.width * 4 },
+    gridSize
   );
 }
 
