@@ -2,8 +2,13 @@ import { useCallback, useRef } from "react";
 import { useEffect, useState } from "react";
 import { ShaderMode } from "../utils/RenderPass";
 import SimulationControls from "../components/ui/SimulationControls";
+import {
+  PerformanceViewer,
+  usePerformanceToggle,
+} from "../components/PerformanceViewer";
 import { usePersistedState } from "../utils/localStorage.utils";
 import { type SmokeTextureID, SIMULATION_CONSTANTS } from "./constants";
+import type { PerformanceMetrics } from "../utils/PerformanceTracker";
 import SmokeSimulation from "./SmokeSimulation";
 
 const CANVAS_HEIGHT = 512;
@@ -16,6 +21,12 @@ function SmokeSimulationComponent() {
   const [isInitialized, setIsInitialized] = useState(false);
   const [isPlaying, setIsPlaying] = useState(true);
   const [initError, setInitError] = useState<string | null>(null);
+  const [performanceMetrics, setPerformanceMetrics] =
+    useState<PerformanceMetrics>({
+      js: 0,
+      fps: 0,
+    });
+  const isPerformanceVisible = usePerformanceToggle();
   const [selectedMode, setSelectedMode] = usePersistedState<ShaderMode>(
     "smoke-simulation-shader-mode",
     ShaderMode.DENSITY
@@ -90,6 +101,12 @@ function SmokeSimulationComponent() {
             shaderMode: selectedMode,
             texture: selectedTexture,
           });
+
+          // Update performance metrics
+          setPerformanceMetrics(
+            smokeSimulation.current.getPerformanceMetrics()
+          );
+
           animationFrameRef.current = requestAnimationFrame(animate);
         } catch (error) {
           console.error("Failed to step simulation:", error);
@@ -299,6 +316,10 @@ function SmokeSimulationComponent() {
 
   return (
     <div className="p-5">
+      <PerformanceViewer
+        metrics={performanceMetrics}
+        isVisible={isPerformanceVisible}
+      />
       <div className="max-w-6xl mx-auto flex flex-col items-center gap-6">
         {/* Title and Description */}
         <div className="text-center">

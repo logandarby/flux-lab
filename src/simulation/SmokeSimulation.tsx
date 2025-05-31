@@ -7,6 +7,7 @@ import {
 } from "../utils/webgpu.utils";
 import { TextureManager } from "../utils/TextureManager";
 import { RenderPass, ShaderMode } from "../utils/RenderPass";
+import { PerformanceTracker } from "../utils/PerformanceTracker";
 import {
   VelocityAdvectionPass,
   DiffusionPass,
@@ -116,6 +117,7 @@ function initializeTextures(
 class SmokeSimulation {
   private resources: WebGPUResources | null = null;
   private textureManager: TextureManager<SmokeTextureID> | null = null;
+  private performanceTracker = new PerformanceTracker();
   private advectionPass: VelocityAdvectionPass | null = null;
   private smokeAdvectionPass: SmokeAdvectionPasss | null = null;
   private smokeDiffusionPass: SmokeDiffusionPass | null = null;
@@ -290,6 +292,9 @@ class SmokeSimulation {
   }
 
   public step(config: SimulationStepConfig = {}) {
+    const jsStartTime = performance.now();
+    this.performanceTracker.recordFrame();
+
     // Destructure with defaults
     const {
       renderOnly = false,
@@ -604,6 +609,14 @@ class SmokeSimulation {
 
     renderPassEncoder.end();
     this.resources.device.queue.submit([commandEncoder.finish()]);
+
+    // Record JS performance time
+    const jsElapsed = performance.now() - jsStartTime;
+    this.performanceTracker.recordJS(jsElapsed);
+  }
+
+  public getPerformanceMetrics() {
+    return this.performanceTracker.getMetrics();
   }
 
   public reset(
