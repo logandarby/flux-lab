@@ -21,6 +21,7 @@ import {
   AddVelocityPass,
   SmokeDissipationPass,
   VelocityDissipationPass,
+  BindLayoutManager,
 } from "./SimulationPasses";
 import {
   AdvectionUniforms,
@@ -45,7 +46,7 @@ function initializeTextures(
   textureManager: TextureManager<SmokeTextureID>,
   device: GPUDevice
 ): void {
-  // Init Velocity
+  // Initialize velocity texture
   const velocityTexture = textureManager.getCurrentTexture("velocity");
   const velocityData = Array(
     SIMULATION_CONSTANTS.grid.size.width * SIMULATION_CONSTANTS.grid.size.height
@@ -59,7 +60,7 @@ function initializeTextures(
     { ...SIMULATION_CONSTANTS.grid.size }
   );
 
-  // Init smoke density texture
+  // Initialize smoke density texture
   const smokeDensityTexture = textureManager.getCurrentTexture("smokeDensity");
   device.queue.writeTexture(
     { texture: smokeDensityTexture },
@@ -75,7 +76,7 @@ function initializeTextures(
     { ...SIMULATION_CONSTANTS.grid.size }
   );
 
-  // Init Smoke particle locations
+  // Initialize smoke particle locations
   const smokeParticlePositionsTexture = textureManager.getCurrentTexture(
     "smokeParticlePosition"
   );
@@ -112,7 +113,7 @@ function initializeTextures(
     { ...SIMULATION_CONSTANTS.particles.smokeDimensions }
   );
 
-  // Init pressure texture to all zeros
+  // Initialize pressure textures to zero
   const pressureTexture = textureManager.getCurrentTexture("pressure");
   const pressureBackTexture = textureManager.getBackTexture("pressure");
   const initPressureData = Array(
@@ -170,7 +171,7 @@ class SmokeSimulation {
     }
     this.resources = await initializeWebGPU(canvasRef.current);
 
-    // Initialize all the simulation components
+    // Initialize texture manager
     this.textureManager = new TextureManager<SmokeTextureID>(
       this.resources.device
     );
@@ -359,7 +360,7 @@ class SmokeSimulation {
     const commandEncoder = this.resources.device.createCommandEncoder();
 
     if (!renderOnly) {
-      // Step 1: Advection
+      // Velocity advection
       if (velocityControls.enableAdvection) {
         const advectionUniforms = new AdvectionUniforms(
           SIMULATION_CONSTANTS.physics.timestep,
@@ -379,7 +380,7 @@ class SmokeSimulation {
         this.textureManager.swap("velocity");
       }
 
-      // Step 2: Diffusion
+      // Velocity diffusion
       if (velocityControls.enableDiffusion) {
         const diffusionUniforms = new DiffusionUniforms(
           SIMULATION_CONSTANTS.physics.timestep,
@@ -397,10 +398,9 @@ class SmokeSimulation {
           SIMULATION_CONSTANTS.iterations.diffusion
         );
         diffusionPassEncoder.end();
-        // Note: Diffusion pass handles its own texture swapping
       }
 
-      // Step 3: Divergence
+      // Divergence calculation
       if (velocityControls.enableDivergence) {
         const divergenceUniforms = new DivergenceUniforms(
           SIMULATION_CONSTANTS.grid.scale
@@ -418,7 +418,7 @@ class SmokeSimulation {
         divergencePassEncoder.end();
       }
 
-      // Step 4: Pressure Projection
+      // Pressure projection
       if (velocityControls.enablePressureProjection) {
         const pressureUniforms = new PressureUniforms(
           SIMULATION_CONSTANTS.grid.scale
@@ -435,10 +435,9 @@ class SmokeSimulation {
           SIMULATION_CONSTANTS.iterations.pressure
         );
         pressurePassEncoder.end();
-        // Note: Pressure pass handles its own texture swapping
       }
 
-      // Step 4.5: Pressure Boundary Conditions (Neumann)
+      // Pressure boundary conditions
       if (velocityControls.enablePressureBoundaryConditions) {
         const pressureBoundaryUniforms = new BoundaryUniforms(
           BoundaryType.SCALAR_NEUMANN
@@ -457,7 +456,7 @@ class SmokeSimulation {
         this.textureManager.swap("pressure");
       }
 
-      // Step 5: Gradient Subtraction
+      // Gradient subtraction
       if (velocityControls.enableGradientSubtraction) {
         const gradientUniforms = new GradientSubtractionUniforms(
           SIMULATION_CONSTANTS.grid.scale
@@ -476,7 +475,7 @@ class SmokeSimulation {
         this.textureManager.swap("velocity");
       }
 
-      // Step 6: Velocity Boundary Conditions (No-slip)
+      // Velocity boundary conditions
       if (velocityControls.enableVelocityBoundaryConditions) {
         const velocityBoundaryUniforms = new BoundaryUniforms(
           BoundaryType.NO_SLIP_VELOCITY
@@ -495,7 +494,7 @@ class SmokeSimulation {
         this.textureManager.swap("velocity");
       }
 
-      // Velocity Dissipation Pass - Apply dissipation to gradually reduce velocity
+      // Velocity dissipation
       if (velocityControls.enableDissipation) {
         const velocityDissipationUniforms = new DissipationUniforms(
           SIMULATION_CONSTANTS.physics.velocityDissipationFactor
@@ -513,7 +512,7 @@ class SmokeSimulation {
         this.textureManager.swap("velocity");
       }
 
-      // Smoke Advection Pass
+      // Smoke advection
       if (smokeControls.enableAdvection) {
         const smokeAdvectionUniforms = new AdvectionUniforms(
           SIMULATION_CONSTANTS.physics.timestep,
@@ -532,7 +531,7 @@ class SmokeSimulation {
         this.textureManager.swap("smokeDensity");
       }
 
-      // Smoke Density Boundary Conditions (Neumann)
+      // Smoke boundary conditions
       if (smokeControls.enableBoundaryConditions) {
         const smokeBoundaryUniforms = new BoundaryUniforms(
           BoundaryType.SCALAR_NEUMANN
@@ -552,7 +551,7 @@ class SmokeSimulation {
       }
     }
 
-    // Smoke Diffusion Pass
+    // Smoke diffusion
     if (smokeControls.enableDiffusion) {
       const smokeDiffusionUniforms = new DiffusionUniforms(
         SIMULATION_CONSTANTS.physics.timestep,
@@ -572,7 +571,7 @@ class SmokeSimulation {
       this.textureManager.swap("smokeDensity");
     }
 
-    // Smoke Dissipation Pass
+    // Smoke dissipation
     if (smokeControls.enableDissipation) {
       const smokeDissipationUniforms = new DissipationUniforms(
         SIMULATION_CONSTANTS.physics.smokeDissipationFactor
@@ -591,6 +590,12 @@ class SmokeSimulation {
     }
 
     // Render Pass
+    // Ensure canvas context is properly configured with current device
+    this.resources.context.configure({
+      device: this.resources.device,
+      format: this.resources.canvasFormat,
+    });
+
     const renderPassEncoder = commandEncoder.beginRenderPass({
       label: "Texture Render Pass",
       colorAttachments: [
@@ -639,10 +644,10 @@ class SmokeSimulation {
       );
     }
 
-    // Only reinitialize the velocity field
+    // Reinitialize textures
     initializeTextures(this.textureManager, this.resources.device);
 
-    // Force a render
+    // Render initial state
     this.step({ renderOnly: true, shaderMode, texture });
   }
 
@@ -721,8 +726,15 @@ class SmokeSimulation {
     this.resources.device.queue.submit([commandEncoder.finish()]);
   }
 
+  // Just cleanup heavy resources -- textures and uniform buffers
   public destroy(): void {
-    // Destroy all pass uniform managers
+    if (!this.isInitialized) {
+      return;
+    }
+
+    // Clean up heavy resources
+    this.textureManager?.destroy(); // Multiple large textures
+    this.renderingPass?.destroy(); // Uniform buffers
     this.advectionPass?.destroy();
     this.smokeAdvectionPass?.destroy();
     this.smokeDiffusionPass?.destroy();
@@ -735,8 +747,18 @@ class SmokeSimulation {
     this.boundaryConditionsPass?.destroy();
     this.addSmokePass?.destroy();
     this.addVelocityPass?.destroy();
+
+    // Clean up device-specific caches
+    if (this.resources?.device) {
+      BindLayoutManager.destroyDevice(this.resources.device);
+    }
+
+    // Clear critical references
+    this.resources = null;
+    this.textureManager = null;
+    this.renderingPass = null;
+
     console.log("SmokeSimulation destroyed");
-    // Reset state
     this.isInitialized = false;
   }
 }

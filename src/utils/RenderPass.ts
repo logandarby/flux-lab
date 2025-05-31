@@ -145,4 +145,8 @@ export class RenderPass<TextureID extends string | number> {
     pass.setBindGroup(0, bindGroup);
     pass.draw(drawConfig.vertexCount, drawConfig.instanceCount);
   }
+
+  public destroy(): void {
+    this.uniformBuffer.destroy();
+  }
 }

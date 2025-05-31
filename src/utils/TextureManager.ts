@@ -79,4 +79,16 @@ export class TextureManager<TextureID extends string | number> {
     }
     return backTexture.back;
   }
+
+  public destroy(): void {
+    // Destroy all managed textures
+    for (const [_name, textureBuffer] of this.textures.entries()) {
+      textureBuffer.front.destroy();
+      if ("back" in textureBuffer) {
+        textureBuffer.back.destroy();
+      }
+    }
+    // Clear the texture map
+    this.textures.clear();
+  }
 }

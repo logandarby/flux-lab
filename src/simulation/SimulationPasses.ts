@@ -207,38 +207,67 @@ const BIND_GROUP_LAYOUT_DESCRIPTOR_RECORD: Record<
 
 /**
  * Manages cached bind group layouts to avoid recreation overhead.
- * WebGPU layout creation is expensive, so we cache them per device.
  */
-class BindLayoutManager {
-  private static readonly layoutMap = new Map<string, GPUBindGroupLayout>();
+export class BindLayoutManager {
+  private static readonly layoutMap = new Map<
+    GPUDevice,
+    Map<BindGroupLayoutType, GPUBindGroupLayout>
+  >();
 
   public static getBindGroupLayout(
     device: GPUDevice,
     layoutType: BindGroupLayoutType
-  ) {
-    const cacheKey = `${device.label || device.adapterInfo?.device || "device"}_${layoutType}`;
-    if (this.layoutMap.has(cacheKey)) {
-      return this.layoutMap.get(cacheKey)!;
+  ): GPUBindGroupLayout {
+    // Get or create device-specific cache
+    let deviceCache = this.layoutMap.get(device);
+    if (!deviceCache) {
+      deviceCache = new Map<BindGroupLayoutType, GPUBindGroupLayout>();
+      this.layoutMap.set(device, deviceCache);
     }
+
+    // Check if layout already exists for this device
+    if (deviceCache.has(layoutType)) {
+      return deviceCache.get(layoutType)!;
+    }
+
+    // Create new layout
     const layoutDesc: GPUBindGroupLayoutDescriptor | null =
       BIND_GROUP_LAYOUT_DESCRIPTOR_RECORD[layoutType];
     if (!layoutDesc) {
       throw new Error(`Unknown layout type: ${layoutType}`);
     }
+
     const layout = device.createBindGroupLayout(layoutDesc);
-    this.layoutMap.set(cacheKey, layout);
+    deviceCache.set(layoutType, layout);
     return layout;
+  }
+
+  /**
+   * Clean up cached layouts for a specific device.
+   */
+  public static destroyDevice(device: GPUDevice): void {
+    const deviceCache = this.layoutMap.get(device);
+    if (deviceCache) {
+      // Note: WebGPU bind group layouts don't have a destroy() method
+      // They are automatically cleaned up when the device is lost
+      deviceCache.clear();
+      this.layoutMap.delete(device);
+    }
+  }
+
+  /**
+   * Clean up all cached bind group layouts.
+   */
+  public static destroyAll(): void {
+    for (const [_device, deviceCache] of this.layoutMap.entries()) {
+      deviceCache.clear();
+    }
+    this.layoutMap.clear();
   }
 }
 
 /**
- * Base class for compute passes that need uniform buffer management.
- * Handles uniform buffer creation, caching, and binding automatically.
- *
- * This class manages the common pattern of:
- * 1. Creating uniform buffers from typed data
- * 2. Caching buffers to avoid redundant GPU uploads
- * 3. Binding uniforms to compute passes
+ * Base class for compute passes with uniform buffer management.
  */
 abstract class UniformComputePass<
   TTextureID extends string,
@@ -257,7 +286,6 @@ abstract class UniformComputePass<
 
   /**
    * Execute the compute pass with typed uniform data.
-   * The uniform manager handles buffer creation and caching automatically.
    */
   public executeWithUniforms(
     pass: GPUComputePassEncoder,
@@ -283,11 +311,6 @@ abstract class UniformComputePass<
 
 /**
  * Base class for iterative algorithms like diffusion and pressure solving.
- * Extends UniformComputePass with the ability to run multiple iterations
- * while automatically swapping ping-pong textures between iterations.
- *
- * This is used for iterative solvers in fluid simulation where we need
- * to repeatedly apply an operation while swapping read/write textures.
  */
 abstract class IterativeComputePass<
   TTextureID extends string,
@@ -295,14 +318,11 @@ abstract class IterativeComputePass<
 > extends UniformComputePass<TTextureID, TUniform> {
   /**
    * Subclasses must specify which texture to swap between iterations.
-   * This enables different passes to iterate on different fields
-   * (velocity, pressure, density, etc.)
    */
   protected abstract getSwapTextureId(): TTextureID;
 
   /**
    * Execute multiple iterations of the pass.
-   * Each iteration runs the compute shader and swaps the specified texture.
    */
   public executeIterations(
     pass: GPUComputePassEncoder,
@@ -325,10 +345,6 @@ abstract class IterativeComputePass<
 
 /**
  * Advects smoke density using the velocity field.
- *
- * This implements semi-Lagrangian advection, where we trace particles
- * backward through the velocity field to determine what density value
- * should end up at each grid cell.
  */
 export class SmokeAdvectionPasss extends UniformComputePass<
   SmokeTextureID,
@@ -394,11 +410,7 @@ export class SmokeAdvectionPasss extends UniformComputePass<
 }
 
 /**
- * Diffuses smoke density using Jacobi iteration to solve the diffusion equation.
- *
- * Diffusion simulates how smoke spreads out over time due to molecular motion.
- * We solve the diffusion equation using multiple Jacobi iterations, where each
- * iteration brings us closer to the steady-state solution.
+ * Diffuses smoke density using Jacobi iteration.
  */
 export class SmokeDiffusionPass extends IterativeComputePass<
   SmokeTextureID,
@@ -469,10 +481,6 @@ export class SmokeDiffusionPass extends IterativeComputePass<
 
 /**
  * Advects velocity using the velocity field itself.
- *
- * This implements the non-linear advection term in the Navier-Stokes equations,
- * where velocity is transported by its own flow field. This creates the swirling,
- * turbulent behavior characteristic of fluid motion.
  */
 export class VelocityAdvectionPass extends UniformComputePass<
   SmokeTextureID,
@@ -538,11 +546,7 @@ export class VelocityAdvectionPass extends UniformComputePass<
 }
 
 /**
- * Diffuses velocity using Jacobi iteration to solve the viscous diffusion equation.
- *
- * This simulates fluid viscosity - how the fluid resists flow and tends to
- * smooth out velocity differences. Higher viscosity creates more viscous,
- * honey-like behavior.
+ * Diffuses velocity using Jacobi iteration.
  */
 export class DiffusionPass extends IterativeComputePass<
   SmokeTextureID,
@@ -613,11 +617,6 @@ export class DiffusionPass extends IterativeComputePass<
 
 /**
  * Computes the divergence of the velocity field.
- *
- * Divergence measures how much the velocity field is "spreading out" or
- * "converging" at each point. For incompressible flow, the divergence
- * should be zero everywhere, so this step prepares data for the pressure
- * projection that will enforce incompressibility.
  */
 export class DivergencePass extends UniformComputePass<
   SmokeTextureID,
@@ -676,12 +675,7 @@ export class DivergencePass extends UniformComputePass<
 }
 
 /**
- * Solves for pressure using Jacobi iteration to enforce incompressibility.
- *
- * This solves Poisson's equation for pressure, where the right-hand side
- * is the negative divergence computed in the previous step. The pressure
- * field will later be used to correct the velocity field to make it
- * divergence-free (incompressible).
+ * Solves for pressure using Jacobi iteration.
  */
 export class PressurePass extends IterativeComputePass<
   SmokeTextureID,
@@ -752,11 +746,6 @@ export class PressurePass extends IterativeComputePass<
 
 /**
  * Subtracts pressure gradient from velocity to enforce incompressibility.
- *
- * This implements the projection step of the pressure projection method.
- * By subtracting the gradient of pressure from velocity, we remove the
- * divergent component and ensure the velocity field is incompressible.
- * This is the final step that makes the fluid behave like a real incompressible fluid.
  */
 export class GradientSubtractionPass extends UniformComputePass<
   SmokeTextureID,
@@ -822,12 +811,6 @@ export class GradientSubtractionPass extends UniformComputePass<
 
 /**
  * Enforces boundary conditions on velocity and scalar fields.
- *
- * Boundary conditions define how the fluid behaves at the edges of the
- * simulation domain. This pass can handle different types of boundaries:
- * - No-slip: fluid sticks to walls (zero velocity)
- * - Free-slip: fluid can slide along walls
- * - Neumann: scalar fields have zero gradient at boundaries
  */
 export class BoundaryConditionsPass extends UniformComputePass<
   SmokeTextureID,
@@ -976,7 +959,6 @@ export class BoundaryConditionsPass extends UniformComputePass<
 
   /**
    * Execute boundary conditions for a specific texture type.
-   * Automatically selects the appropriate shader and pipeline based on texture format.
    */
   public executeForTexture(
     pass: GPUComputePassEncoder,
@@ -1017,14 +999,19 @@ export class BoundaryConditionsPass extends UniformComputePass<
     pass.setBindGroup(0, bindGroup);
     pass.dispatchWorkgroups(workgroupCount, workgroupCount);
   }
+
+  public override destroy(): void {
+    // Clean up additional pipelines
+    this.velocityPipeline = null;
+    this.scalarPipeline = null;
+
+    // Call parent destroy to clean up uniform manager
+    super.destroy();
+  }
 }
 
 /**
  * Adds smoke density at a specific position.
- *
- * This allows interactive control over the simulation by injecting
- * smoke at mouse click positions or other user-defined locations.
- * The smoke appears as a smooth blob with configurable radius and intensity.
  */
 export class AddSmokePass extends UniformComputePass<
   SmokeTextureID,
@@ -1104,10 +1091,6 @@ export class AddSmokePass extends UniformComputePass<
 
 /**
  * Adds velocity at a specific position based on mouse movement.
- *
- * This creates interactive fluid motion by injecting velocity based on
- * mouse drag direction and speed. This simulates stirring or pushing
- * the fluid, creating swirls and turbulence.
  */
 export class AddVelocityPass extends UniformComputePass<
   SmokeTextureID,

@@ -31,26 +31,51 @@ function SmokeSimulationComponent() {
   const previousMousePos = useRef<{ x: number; y: number } | null>(null);
   const lastInteractionTime = useRef<number>(0);
 
+  // Cleanup effect - destroy simulation when component unmounts
+  useEffect(() => {
+    return () => {
+      console.log("Component cleanup - destroying simulation");
+      if (smokeSimulation.current) {
+        smokeSimulation.current.destroy();
+        smokeSimulation.current = null;
+      }
+      setIsInitialized(false);
+    };
+  }, []);
+
   useEffect(() => {
     const runSimulation = async () => {
-      if (!canvasRef.current || !!smokeSimulation.current || isInitialized) {
+      // Prevent double initialization
+      if (!canvasRef.current || smokeSimulation.current) {
         return;
       }
+
       console.log("Initializing Smoke Simulation");
-      smokeSimulation.current = new SmokeSimulation();
+      const simulation = new SmokeSimulation();
+      smokeSimulation.current = simulation;
+
       try {
-        await smokeSimulation.current.initialize(canvasRef);
-        setIsInitialized(true);
-        setInitError(null);
+        await simulation.initialize(canvasRef);
+        // Only update state if this simulation instance is still current
+        if (smokeSimulation.current === simulation) {
+          setIsInitialized(true);
+          setInitError(null);
+        }
       } catch (error) {
         console.error("Failed to initialize smoke simulation:", error);
-        smokeSimulation.current = null;
-        setIsInitialized(false);
-        setInitError(error instanceof Error ? error.message : "Unknown error");
+        // Only clean up if this simulation instance is still current
+        if (smokeSimulation.current === simulation) {
+          simulation.destroy();
+          smokeSimulation.current = null;
+          setIsInitialized(false);
+          setInitError(
+            error instanceof Error ? error.message : "Unknown error"
+          );
+        }
       }
     };
     runSimulation();
-  }, [isInitialized]);
+  }, []); // Remove isInitialized dependency to prevent re-initialization
 
   // Animation loop
   useEffect(() => {
