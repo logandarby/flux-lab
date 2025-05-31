@@ -2,14 +2,12 @@ import { useCallback, useRef } from "react";
 import { useEffect, useState } from "react";
 import { ShaderMode } from "../utils/RenderPass";
 import SimulationControls from "../components/ui/SimulationControls";
-import {
-  PerformanceViewer,
-  usePerformanceToggle,
-} from "../components/PerformanceViewer";
+import { PerformanceViewer } from "../components/PerformanceViewer";
 import { usePersistedState } from "../utils/localStorage.utils";
 import { type SmokeTextureID, SIMULATION_CONSTANTS } from "./constants";
 import type { PerformanceMetrics } from "../utils/PerformanceTracker";
 import SmokeSimulation from "./SmokeSimulation";
+import { usePerformanceToggle } from "../hooks/usePerformanceToggle";
 
 const CANVAS_HEIGHT = 512;
 const CANVAS_WIDTH = CANVAS_HEIGHT;

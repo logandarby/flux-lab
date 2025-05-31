@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React from "react";
 import { Card, CardContent } from "./ui/card";
 import type { PerformanceMetrics } from "../utils/PerformanceTracker";
 
@@ -27,21 +27,4 @@ export const PerformanceViewer: React.FC<PerformanceViewerProps> = ({
       </CardContent>
     </Card>
   );
-};
-
-export const usePerformanceToggle = () => {
-  const [isVisible, setIsVisible] = useState(false);
-
-  useEffect(() => {
-    const handleKeyPress = (event: KeyboardEvent) => {
-      if (event.key.toLowerCase() === "p") {
-        setIsVisible((prev) => !prev);
-      }
-    };
-
-    window.addEventListener("keydown", handleKeyPress);
-    return () => window.removeEventListener("keydown", handleKeyPress);
-  }, []);
-
-  return isVisible;
 };

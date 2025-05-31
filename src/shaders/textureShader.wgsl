@@ -111,38 +111,31 @@ fn shadeDensity(value: f32, input: VertexOutput) -> vec4f {
 }
 
 fn rand(co: vec2f) -> f32 {
-  let r = fract(sin(dot(co.xy, vec2f(12.9898,78.233))) * 43758.5453);
-  if (r == 0.0) {
-    return 0.000000000001;
-  }
-  else {
-    return r;
-  }
+    let r = fract(sin(dot(co.xy, vec2f(12.9898,78.233))) * 43758.5453);
+    if (r == 0.0) {
+        return 0.000000000001;
+    }
+    else {
+        return r;
+    }
 }
 
 fn gaussrand(co: vec2f) -> vec4f {
-  // Box-Muller method for sampling from the normal distribution
-  // http://en.wikipedia.org/wiki/Normal_distribution#Generating_values_from_normal_distribution
-  // This method requires 2 uniform random inputs and produces 2 
-  // Gaussian random outputs.  We'll take a 3rd random variable and use it to
-  // switch between the two outputs.
-  let PI = 3.141592653589793238462;
-  var Z: f32;
-  let offsets = uniformInput.offsets;
-  let U = rand(co + vec2(offsets.x, offsets.x));
-  let V = rand(co + vec2(offsets.y, offsets.y));
-  let R = rand(co + vec2(offsets.z, offsets.z));
-  // Switch between the two random outputs.
-  if(R < 0.5) {
-    Z = sqrt(-2.0 * log(U)) * sin(2.0 * PI * V);
-  }
-  else {
-    Z = sqrt(-2.0 * log(U)) * cos(2.0 * PI * V);
-  }
+    let PI = 3.141592653589793238462;
+    let offsets = uniformInput.offsets;
+    let U = rand(co + vec2(offsets.x, offsets.x));
+    let V = rand(co + vec2(offsets.y, offsets.y));
+    let R = rand(co + vec2(offsets.z, offsets.z));
+    var Z = sqrt(-2.0 * log(U)) * sin(2.0 * PI * V);
+    Z = Z * uniformInput.stddev + uniformInput.mean;
+    return vec4f(Z, Z, Z, 0.0);
+}
 
-  // Apply the stddev and mean.
-  Z = Z * uniformInput.stddev + uniformInput.mean;
-  return vec4(Z, Z, Z, 0.0);
+fn addNoise(color: vec4f, texCoord: vec2f) -> vec4f {
+    let magnitude = sqrt(dot(color.xy, color.xy));
+    let noise = gaussrand(texCoord) ;
+    let baseNoise = gaussrand(texCoord) * 0.2;
+    return color + noise * magnitude + baseNoise;
 }
 
 @fragment
@@ -165,6 +158,6 @@ fn fragment_main(input: VertexOutput) -> @location(0)vec4f {
             output = vec4(1, 1, 1, 1);
         }
     }
-    // Add noise
-    return output + gaussrand(input.texCoord.xy);
+
+    return addNoise(output, input.texCoord);
 }

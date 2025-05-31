@@ -126,7 +126,7 @@ export const SIMULATION_CONSTANTS: SimulationConstants = {
 
   interaction: {
     radius: 20, // Radius of effect when adding smoke/velocity
-    smokeIntensity: 0.1, // Intensity of smoke when clicking
+    smokeIntensity: 0.4, // Intensity of smoke when clicking
     velocityIntensity: 2.0, // Intensity multiplier for velocity when dragging
   },
 
