@@ -1,6 +1,20 @@
 import { ComputePass, type BindGroupArgs } from "../utils/ComputePass";
 import { injectShaderVariables } from "../utils/webgpu.utils";
 import type { SmokeTextureID } from "../SmokeSimulation";
+import type { TextureManager } from "../utils/TextureManager";
+import {
+  UniformManager,
+  AdvectionUniforms,
+  DiffusionUniforms,
+  DivergenceUniforms,
+  PressureUniforms,
+  GradientSubtractionUniforms,
+  BoundaryUniforms,
+  AddSmokeUniforms,
+  AddVelocityUniforms,
+  DissipationUniforms,
+  type UniformData,
+} from "../utils/UniformManager";
 
 import advectionShaderTemplate from "../shaders/advectionShader.wgsl?raw";
 import jacobiIterationShaderTemplate from "../shaders/jacobiIteration.wgsl?raw";
@@ -12,22 +26,33 @@ import addSmokeShaderTemplate from "../shaders/addSmokeShader.wgsl?raw";
 import addVelocityShaderTemplate from "../shaders/addVelocityShader.wgsl?raw";
 import dissipationShaderTemplate from "../shaders/dissipationShader.wgsl?raw";
 
-// Boundary condition types
+/**
+ * Boundary condition types for fluid simulation.
+ * These control how velocities and scalar fields behave at the edges of the simulation grid.
+ */
 export enum BoundaryType {
-  NO_SLIP_VELOCITY = 0, // No-slip velocity boundary condition
-  FREE_SLIP_VELOCITY = 1, // Free-slip velocity boundary condition
-  SCALAR_NEUMANN = 2, // Neumann boundary condition for scalar fields
+  /** Velocity sticks to boundaries (fluid cannot flow through walls) */
+  NO_SLIP_VELOCITY = 0,
+  /** Velocity can slip along boundaries (frictionless walls) */
+  FREE_SLIP_VELOCITY = 1,
+  /** Scalar fields have zero gradient at boundaries (no flux through walls) */
+  SCALAR_NEUMANN = 2,
 }
 
-// Common bind group layout types for optimization
+/**
+ * Optimized bind group layout types.
+ * These layouts are cached and reused across passes to avoid recreation overhead.
+ */
 enum BindGroupLayoutType {
+  /** Two input textures, one output texture, one uniform buffer */
   READ_READ_WRITE_UNIFORM = "read_read_write_uniform",
+  /** One input texture, one output texture, one uniform buffer */
   READ_WRITE_UNIFORM = "read_write_uniform",
-  // Special case for pressure calculation - output must be r32float instead of r32float
+  /** Pressure-specific layout with r32float output format */
   READ_READ_WRITE_1 = "pressure",
-  // Special case for gradient subtraction - pressure is r32float, velocity/output is rg32float
+  /** Gradient subtraction with mixed texture formats (pressure + velocity) */
   GRADIENT = "gradient",
-  // Special case for boundary conditions - supports both single and dual channel textures
+  /** Boundary conditions with format-agnostic layouts */
   BOUNDARY = "boundary",
 }
 
@@ -181,6 +206,10 @@ const BIND_GROUP_LAYOUT_DESCRIPTOR_RECORD: Record<
   },
 };
 
+/**
+ * Manages cached bind group layouts to avoid recreation overhead.
+ * WebGPU layout creation is expensive, so we cache them per device.
+ */
 class BindLayoutManager {
   private static readonly layoutMap = new Map<string, GPUBindGroupLayout>();
 
@@ -204,9 +233,108 @@ class BindLayoutManager {
 }
 
 /**
- * Advects quantities using the velocity field via semi-Lagrangian method
+ * Base class for compute passes that need uniform buffer management.
+ * Handles uniform buffer creation, caching, and binding automatically.
+ *
+ * This class manages the common pattern of:
+ * 1. Creating uniform buffers from typed data
+ * 2. Caching buffers to avoid redundant GPU uploads
+ * 3. Binding uniforms to compute passes
  */
-export class SmokeAdvectionPasss extends ComputePass<SmokeTextureID> {
+abstract class UniformComputePass<
+  TTextureID extends string,
+  TUniform extends UniformData,
+> extends ComputePass<TTextureID> {
+  protected uniformManager: UniformManager<TUniform>;
+
+  constructor(
+    config: { name: string; entryPoint: string; shader: GPUShaderModule },
+    device: GPUDevice,
+    uniformLabel: string
+  ) {
+    super(config, device);
+    this.uniformManager = new UniformManager<TUniform>(device, uniformLabel);
+  }
+
+  /**
+   * Execute the compute pass with typed uniform data.
+   * The uniform manager handles buffer creation and caching automatically.
+   */
+  public executeWithUniforms(
+    pass: GPUComputePassEncoder,
+    uniformData: TUniform,
+    textureManager: TextureManager<TTextureID>,
+    workgroupCount: number
+  ): void {
+    const uniformBuffer = this.uniformManager.getBuffer(uniformData);
+    const bindGroup = this.createBindGroup({
+      textureManager,
+      uniformBuffer,
+    });
+
+    pass.setPipeline(this.pipeline);
+    pass.setBindGroup(0, bindGroup);
+    pass.dispatchWorkgroups(workgroupCount, workgroupCount);
+  }
+
+  public destroy(): void {
+    this.uniformManager.destroy();
+  }
+}
+
+/**
+ * Base class for iterative algorithms like diffusion and pressure solving.
+ * Extends UniformComputePass with the ability to run multiple iterations
+ * while automatically swapping ping-pong textures between iterations.
+ *
+ * This is used for iterative solvers in fluid simulation where we need
+ * to repeatedly apply an operation while swapping read/write textures.
+ */
+abstract class IterativeComputePass<
+  TTextureID extends string,
+  TUniform extends UniformData,
+> extends UniformComputePass<TTextureID, TUniform> {
+  /**
+   * Subclasses must specify which texture to swap between iterations.
+   * This enables different passes to iterate on different fields
+   * (velocity, pressure, density, etc.)
+   */
+  protected abstract getSwapTextureId(): TTextureID;
+
+  /**
+   * Execute multiple iterations of the pass.
+   * Each iteration runs the compute shader and swaps the specified texture.
+   */
+  public executeIterations(
+    pass: GPUComputePassEncoder,
+    uniformData: TUniform,
+    textureManager: TextureManager<TTextureID>,
+    workgroupCount: number,
+    iterations: number
+  ): void {
+    for (let i = 0; i < iterations; i++) {
+      this.executeWithUniforms(
+        pass,
+        uniformData,
+        textureManager,
+        workgroupCount
+      );
+      textureManager.swap(this.getSwapTextureId());
+    }
+  }
+}
+
+/**
+ * Advects smoke density using the velocity field.
+ *
+ * This implements semi-Lagrangian advection, where we trace particles
+ * backward through the velocity field to determine what density value
+ * should end up at each grid cell.
+ */
+export class SmokeAdvectionPasss extends UniformComputePass<
+  SmokeTextureID,
+  AdvectionUniforms
+> {
   constructor(device: GPUDevice, workgroupSize: number) {
     super(
       {
@@ -220,7 +348,8 @@ export class SmokeAdvectionPasss extends ComputePass<SmokeTextureID> {
           }),
         }),
       },
-      device
+      device,
+      "Smoke Advection Uniforms"
     );
   }
 
@@ -266,9 +395,16 @@ export class SmokeAdvectionPasss extends ComputePass<SmokeTextureID> {
 }
 
 /**
- * Diffuses the smoke density field using Jacobi iterations to solve the diffusion equation
+ * Diffuses smoke density using Jacobi iteration to solve the diffusion equation.
+ *
+ * Diffusion simulates how smoke spreads out over time due to molecular motion.
+ * We solve the diffusion equation using multiple Jacobi iterations, where each
+ * iteration brings us closer to the steady-state solution.
  */
-export class SmokeDiffusionPass extends ComputePass<SmokeTextureID> {
+export class SmokeDiffusionPass extends IterativeComputePass<
+  SmokeTextureID,
+  DiffusionUniforms
+> {
   constructor(device: GPUDevice, workgroupSize: number) {
     super(
       {
@@ -282,8 +418,13 @@ export class SmokeDiffusionPass extends ComputePass<SmokeTextureID> {
           }),
         }),
       },
-      device
+      device,
+      "Smoke Diffusion Uniforms"
     );
+  }
+
+  protected getSwapTextureId(): SmokeTextureID {
+    return "smokeDensity";
   }
 
   protected createBindGroupLayout(): GPUBindGroupLayout {
@@ -325,30 +466,19 @@ export class SmokeDiffusionPass extends ComputePass<SmokeTextureID> {
       ],
     });
   }
-
-  public executeIterations(
-    pass: GPUComputePassEncoder,
-    bindGroupArgs: BindGroupArgs<SmokeTextureID>,
-    workgroupCount: number,
-    iterations: number
-  ): void {
-    for (let i = 0; i < iterations; i++) {
-      const bindGroup = this.createBindGroup(bindGroupArgs);
-
-      pass.setPipeline(this.pipeline);
-      pass.setBindGroup(0, bindGroup);
-      pass.dispatchWorkgroups(workgroupCount, workgroupCount);
-
-      // Swap textures for next iteration
-      bindGroupArgs.textureManager?.swap("smokeDensity");
-    }
-  }
 }
 
 /**
- * Advects quantities using the velocity field via semi-Lagrangian method
+ * Advects velocity using the velocity field itself.
+ *
+ * This implements the non-linear advection term in the Navier-Stokes equations,
+ * where velocity is transported by its own flow field. This creates the swirling,
+ * turbulent behavior characteristic of fluid motion.
  */
-export class VelocityAdvectionPass extends ComputePass<SmokeTextureID> {
+export class VelocityAdvectionPass extends UniformComputePass<
+  SmokeTextureID,
+  AdvectionUniforms
+> {
   constructor(device: GPUDevice, workgroupSize: number) {
     super(
       {
@@ -362,7 +492,8 @@ export class VelocityAdvectionPass extends ComputePass<SmokeTextureID> {
           }),
         }),
       },
-      device
+      device,
+      "Velocity Advection Uniforms"
     );
   }
 
@@ -408,9 +539,16 @@ export class VelocityAdvectionPass extends ComputePass<SmokeTextureID> {
 }
 
 /**
- * Diffuses the velocity field using Jacobi iterations to solve the diffusion equation
+ * Diffuses velocity using Jacobi iteration to solve the viscous diffusion equation.
+ *
+ * This simulates fluid viscosity - how the fluid resists flow and tends to
+ * smooth out velocity differences. Higher viscosity creates more viscous,
+ * honey-like behavior.
  */
-export class DiffusionPass extends ComputePass<SmokeTextureID> {
+export class DiffusionPass extends IterativeComputePass<
+  SmokeTextureID,
+  DiffusionUniforms
+> {
   constructor(device: GPUDevice, workgroupSize: number) {
     super(
       {
@@ -424,8 +562,13 @@ export class DiffusionPass extends ComputePass<SmokeTextureID> {
           }),
         }),
       },
-      device
+      device,
+      "Velocity Diffusion Uniforms"
     );
+  }
+
+  protected getSwapTextureId(): SmokeTextureID {
+    return "velocity";
   }
 
   protected createBindGroupLayout(): GPUBindGroupLayout {
@@ -467,30 +610,20 @@ export class DiffusionPass extends ComputePass<SmokeTextureID> {
       ],
     });
   }
-
-  public executeIterations(
-    pass: GPUComputePassEncoder,
-    bindGroupArgs: BindGroupArgs<SmokeTextureID>,
-    workgroupCount: number,
-    iterations: number
-  ): void {
-    for (let i = 0; i < iterations; i++) {
-      const bindGroup = this.createBindGroup(bindGroupArgs);
-
-      pass.setPipeline(this.pipeline);
-      pass.setBindGroup(0, bindGroup);
-      pass.dispatchWorkgroups(workgroupCount, workgroupCount);
-
-      // Swap textures for next iteration
-      bindGroupArgs.textureManager?.swap("velocity");
-    }
-  }
 }
 
 /**
- * Computes the divergence of the velocity field
+ * Computes the divergence of the velocity field.
+ *
+ * Divergence measures how much the velocity field is "spreading out" or
+ * "converging" at each point. For incompressible flow, the divergence
+ * should be zero everywhere, so this step prepares data for the pressure
+ * projection that will enforce incompressibility.
  */
-export class DivergencePass extends ComputePass<SmokeTextureID> {
+export class DivergencePass extends UniformComputePass<
+  SmokeTextureID,
+  DivergenceUniforms
+> {
   constructor(device: GPUDevice, workgroupSize: number) {
     super(
       {
@@ -503,7 +636,8 @@ export class DivergencePass extends ComputePass<SmokeTextureID> {
           }),
         }),
       },
-      device
+      device,
+      "Divergence Uniforms"
     );
   }
 
@@ -543,9 +677,17 @@ export class DivergencePass extends ComputePass<SmokeTextureID> {
 }
 
 /**
- * Solves for pressure using Jacobi iterations to enforce incompressibility
+ * Solves for pressure using Jacobi iteration to enforce incompressibility.
+ *
+ * This solves Poisson's equation for pressure, where the right-hand side
+ * is the negative divergence computed in the previous step. The pressure
+ * field will later be used to correct the velocity field to make it
+ * divergence-free (incompressible).
  */
-export class PressurePass extends ComputePass<SmokeTextureID> {
+export class PressurePass extends IterativeComputePass<
+  SmokeTextureID,
+  PressureUniforms
+> {
   constructor(device: GPUDevice, workgroupSize: number) {
     super(
       {
@@ -559,8 +701,13 @@ export class PressurePass extends ComputePass<SmokeTextureID> {
           }),
         }),
       },
-      device
+      device,
+      "Pressure Uniforms"
     );
+  }
+
+  protected getSwapTextureId(): SmokeTextureID {
+    return "pressure";
   }
 
   protected createBindGroupLayout(): GPUBindGroupLayout {
@@ -602,30 +749,20 @@ export class PressurePass extends ComputePass<SmokeTextureID> {
       ],
     });
   }
-
-  public executeIterations(
-    pass: GPUComputePassEncoder,
-    bindGroupArgs: BindGroupArgs<SmokeTextureID>,
-    workgroupCount: number,
-    iterations: number
-  ): void {
-    for (let i = 0; i < iterations; i++) {
-      const bindGroup = this.createBindGroup(bindGroupArgs);
-
-      pass.setPipeline(this.pipeline);
-      pass.setBindGroup(0, bindGroup);
-      pass.dispatchWorkgroups(workgroupCount, workgroupCount);
-
-      // Swap pressure textures for next iteration
-      bindGroupArgs.textureManager?.swap("pressure");
-    }
-  }
 }
 
 /**
- * Subtracts pressure gradient from velocity to enforce incompressibility
+ * Subtracts pressure gradient from velocity to enforce incompressibility.
+ *
+ * This implements the projection step of the pressure projection method.
+ * By subtracting the gradient of pressure from velocity, we remove the
+ * divergent component and ensure the velocity field is incompressible.
+ * This is the final step that makes the fluid behave like a real incompressible fluid.
  */
-export class GradientSubtractionPass extends ComputePass<SmokeTextureID> {
+export class GradientSubtractionPass extends UniformComputePass<
+  SmokeTextureID,
+  GradientSubtractionUniforms
+> {
   constructor(device: GPUDevice, workgroupSize: number) {
     super(
       {
@@ -638,12 +775,12 @@ export class GradientSubtractionPass extends ComputePass<SmokeTextureID> {
           }),
         }),
       },
-      device
+      device,
+      "Gradient Subtraction Uniforms"
     );
   }
 
   protected createBindGroupLayout(): GPUBindGroupLayout {
-    // Special case for gradient subtraction - pressure is r32float, velocity/output is rg32float
     return BindLayoutManager.getBindGroupLayout(
       this.device,
       BindGroupLayoutType.GRADIENT
@@ -685,16 +822,25 @@ export class GradientSubtractionPass extends ComputePass<SmokeTextureID> {
 }
 
 /**
- * Enforces boundary conditions on velocity and scalar fields
+ * Enforces boundary conditions on velocity and scalar fields.
+ *
+ * Boundary conditions define how the fluid behaves at the edges of the
+ * simulation domain. This pass can handle different types of boundaries:
+ * - No-slip: fluid sticks to walls (zero velocity)
+ * - Free-slip: fluid can slide along walls
+ * - Neumann: scalar fields have zero gradient at boundaries
  */
-export class BoundaryConditionsPass extends ComputePass<SmokeTextureID> {
+export class BoundaryConditionsPass extends UniformComputePass<
+  SmokeTextureID,
+  BoundaryUniforms
+> {
   private velocityShader: GPUShaderModule;
   private scalarShader: GPUShaderModule;
   private velocityPipeline: GPUComputePipeline | null = null;
   private scalarPipeline: GPUComputePipeline | null = null;
 
   constructor(device: GPUDevice, workgroupSize: number) {
-    // Create shaders for different texture formats
+    // Create specialized shaders for different texture formats
     const velocityShaderCode = injectShaderVariables(
       boundaryConditionsShaderTemplate,
       {
@@ -721,14 +867,14 @@ export class BoundaryConditionsPass extends ComputePass<SmokeTextureID> {
       code: scalarShaderCode,
     });
 
-    // Use velocity shader as the default
     super(
       {
         name: "Boundary Conditions",
         entryPoint: "compute_main",
         shader: velocityShader,
       },
-      device
+      device,
+      "Boundary Conditions Uniforms"
     );
 
     this.velocityShader = velocityShader;
@@ -821,7 +967,6 @@ export class BoundaryConditionsPass extends ComputePass<SmokeTextureID> {
     return this.scalarPipeline;
   }
 
-  // These methods are required by the base class but won't be used
   protected createBindGroupLayout(): GPUBindGroupLayout {
     return this.getVelocityBindGroupLayout();
   }
@@ -830,18 +975,23 @@ export class BoundaryConditionsPass extends ComputePass<SmokeTextureID> {
     throw new Error("Use executeForTexture method instead");
   }
 
+  /**
+   * Execute boundary conditions for a specific texture type.
+   * Automatically selects the appropriate shader and pipeline based on texture format.
+   */
   public executeForTexture(
     pass: GPUComputePassEncoder,
     textureId: SmokeTextureID,
-    bindGroupArgs: BindGroupArgs<SmokeTextureID>,
+    uniformData: BoundaryUniforms,
+    textureManager: TextureManager<SmokeTextureID>,
     workgroupCount: number
   ): void {
-    this.validateArgs(bindGroupArgs, ["textureManager", "uniformBuffer"]);
-
     const isVelocityTexture = textureId === "velocity";
     const pipeline = isVelocityTexture
       ? this.getVelocityPipeline()
       : this.getScalarPipeline();
+
+    const uniformBuffer = this.uniformManager.getBuffer(uniformData);
 
     const bindGroup = this.device.createBindGroup({
       label: `Boundary ${textureId} Bind Group`,
@@ -851,19 +1001,15 @@ export class BoundaryConditionsPass extends ComputePass<SmokeTextureID> {
       entries: [
         {
           binding: 0,
-          resource: bindGroupArgs
-            .textureManager!.getCurrentTexture(textureId)
-            .createView(),
+          resource: textureManager.getCurrentTexture(textureId).createView(),
         },
         {
           binding: 1,
-          resource: bindGroupArgs
-            .textureManager!.getBackTexture(textureId)
-            .createView(),
+          resource: textureManager.getBackTexture(textureId).createView(),
         },
         {
           binding: 2,
-          resource: { buffer: bindGroupArgs.uniformBuffer! },
+          resource: { buffer: uniformBuffer },
         },
       ],
     });
@@ -874,91 +1020,17 @@ export class BoundaryConditionsPass extends ComputePass<SmokeTextureID> {
   }
 }
 
-/*
- * Uniform buffer utilities for creating consistent buffer data
- */
-export class UniformBufferUtils {
-  public static createAdvectionUniforms(
-    timestep: number,
-    velocityAdvectionFactor: number
-  ): Float32Array {
-    return new Float32Array([timestep, velocityAdvectionFactor]);
-  }
-
-  public static createDiffusionUniforms(
-    timestep: number,
-    diffusionFactor: number
-  ): Float32Array {
-    const alpha = 1 / diffusionFactor / timestep;
-    // const alpha = () / (viscosity * timestep);
-    const rBeta = 1.0 / (4.0 + alpha);
-    return new Float32Array([alpha, rBeta]);
-  }
-
-  public static createDivergenceUniforms(gridScale: number): Float32Array {
-    const halfRdx = 0.5 / gridScale;
-    return new Float32Array([halfRdx]);
-  }
-
-  public static createPressureUniforms(gridScale: number): Float32Array {
-    const rdx = 1.0 / gridScale;
-    const alpha = -(rdx * rdx); // For pressure Poisson equation
-    const rBeta = 0.25;
-    return new Float32Array([alpha, rBeta]);
-  }
-
-  public static createGradientSubtractionUniforms(
-    gridScale: number
-  ): Float32Array {
-    const halfRdx = 0.5 / gridScale;
-    return new Float32Array([halfRdx]);
-  }
-
-  public static createBoundaryUniforms(
-    boundaryType: BoundaryType,
-    scale: number = 1.0
-  ): Float32Array {
-    return new Float32Array([boundaryType, scale]);
-  }
-
-  public static createAddSmokeUniforms(
-    positionX: number,
-    positionY: number,
-    radius: number,
-    intensity: number
-  ): Float32Array {
-    return new Float32Array([positionX, positionY, radius, intensity]);
-  }
-
-  public static createAddVelocityUniforms(
-    positionX: number,
-    positionY: number,
-    velocityX: number,
-    velocityY: number,
-    radius: number,
-    intensity: number
-  ): Float32Array {
-    return new Float32Array([
-      positionX,
-      positionY,
-      velocityX,
-      velocityY,
-      radius,
-      intensity,
-    ]);
-  }
-
-  public static createDissipationUniforms(
-    dissipationFactor: number
-  ): Float32Array {
-    return new Float32Array([dissipationFactor]);
-  }
-}
-
 /**
- * Adds smoke density at a specific position
+ * Adds smoke density at a specific position.
+ *
+ * This allows interactive control over the simulation by injecting
+ * smoke at mouse click positions or other user-defined locations.
+ * The smoke appears as a smooth blob with configurable radius and intensity.
  */
-export class AddSmokePass extends ComputePass<SmokeTextureID> {
+export class AddSmokePass extends UniformComputePass<
+  SmokeTextureID,
+  AddSmokeUniforms
+> {
   constructor(device: GPUDevice, workgroupSize: number) {
     super(
       {
@@ -971,7 +1043,8 @@ export class AddSmokePass extends ComputePass<SmokeTextureID> {
           }),
         }),
       },
-      device
+      device,
+      "Add Smoke Uniforms"
     );
   }
 
@@ -1031,9 +1104,16 @@ export class AddSmokePass extends ComputePass<SmokeTextureID> {
 }
 
 /**
- * Adds velocity at a specific position based on mouse movement
+ * Adds velocity at a specific position based on mouse movement.
+ *
+ * This creates interactive fluid motion by injecting velocity based on
+ * mouse drag direction and speed. This simulates stirring or pushing
+ * the fluid, creating swirls and turbulence.
  */
-export class AddVelocityPass extends ComputePass<SmokeTextureID> {
+export class AddVelocityPass extends UniformComputePass<
+  SmokeTextureID,
+  AddVelocityUniforms
+> {
   constructor(device: GPUDevice, workgroupSize: number) {
     super(
       {
@@ -1046,7 +1126,8 @@ export class AddVelocityPass extends ComputePass<SmokeTextureID> {
           }),
         }),
       },
-      device
+      device,
+      "Add Velocity Uniforms"
     );
   }
 
@@ -1106,9 +1187,16 @@ export class AddVelocityPass extends ComputePass<SmokeTextureID> {
 }
 
 /**
- * Applies dissipation to smoke density, gradually reducing it over time
+ * Applies dissipation to smoke density, gradually reducing it over time.
+ *
+ * This simulates how smoke naturally fades away due to mixing with air,
+ * cooling, or other physical processes. Without dissipation, smoke would
+ * persist forever in the simulation.
  */
-export class SmokeDissipationPass extends ComputePass<SmokeTextureID> {
+export class SmokeDissipationPass extends UniformComputePass<
+  SmokeTextureID,
+  DissipationUniforms
+> {
   constructor(device: GPUDevice, workgroupSize: number) {
     super(
       {
@@ -1123,7 +1211,8 @@ export class SmokeDissipationPass extends ComputePass<SmokeTextureID> {
           }),
         }),
       },
-      device
+      device,
+      "Smoke Dissipation Uniforms"
     );
   }
 
@@ -1183,9 +1272,16 @@ export class SmokeDissipationPass extends ComputePass<SmokeTextureID> {
 }
 
 /**
- * Applies dissipation to velocity field, gradually reducing it over time
+ * Applies dissipation to velocity field, gradually reducing it over time.
+ *
+ * This simulates friction and other energy loss mechanisms that cause
+ * fluid motion to slow down over time. Without velocity dissipation,
+ * the fluid would maintain motion indefinitely.
  */
-export class VelocityDissipationPass extends ComputePass<SmokeTextureID> {
+export class VelocityDissipationPass extends UniformComputePass<
+  SmokeTextureID,
+  DissipationUniforms
+> {
   constructor(device: GPUDevice, workgroupSize: number) {
     super(
       {
@@ -1200,7 +1296,8 @@ export class VelocityDissipationPass extends ComputePass<SmokeTextureID> {
           }),
         }),
       },
-      device
+      device,
+      "Velocity Dissipation Uniforms"
     );
   }
 

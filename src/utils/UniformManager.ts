@@ -1,34 +1,83 @@
-// Type-safe uniform management system for WebGPU compute passes
+/**
+ * Type-safe uniform management system for WebGPU compute passes.
+ *
+ * This system provides automatic buffer management, change detection, and caching
+ * for uniform data in WebGPU compute shaders. It supports both simple float-only
+ * uniforms and complex mixed-type structures with proper alignment.
+ */
 
 /**
- * Base interface for uniform data structures.
- * Supports both simple float arrays and complex mixed-type structures.
+ * Base interface for all uniform data structures.
+ * Defines the minimum requirements for data that can be managed by UniformManager.
  */
-export interface UniformData {
+interface BaseUniformData {
   readonly byteLength: number;
-
-  /**
-   * Simple method for basic float-only uniforms (backward compatibility).
-   * If your uniform contains only floats, implement this method.
-   */
-  toFloat32Array?(): Float32Array;
-
-  /**
-   * Advanced method for complex uniforms with mixed data types.
-   * This gives you full control over how data is written to the buffer.
-   * Use this for structs with integers, vectors, matrices, or custom layouts.
-   */
-  writeToBuffer?(device: GPUDevice, buffer: GPUBuffer, offset?: number): void;
 
   /**
    * Returns data used for change detection and caching.
    * Should return consistent data for the same uniform values.
+   * This is used to determine if the GPU buffer needs to be updated.
    */
   getHashData(): ArrayBuffer | ArrayBufferView | string;
 }
 
 /**
- * Utility class for complex uniform buffer writing with proper alignment.
+ * Interface for uniform data containing only float values.
+ *
+ * Use this for simple uniforms like timesteps, factors, and basic parameters
+ * that can be efficiently represented as a Float32Array. This is the most
+ * common case for compute shader uniforms.
+ */
+interface SimpleUniformData extends BaseUniformData {
+  /**
+   * Convert uniform data to a Float32Array for GPU upload.
+   * This method should be efficient and avoid allocations when possible.
+   */
+  toFloat32Array(): Float32Array;
+}
+
+/**
+ * Interface for uniform data with mixed data types or complex layouts.
+ *
+ * Use this when you need integers, vectors, matrices, or when you need
+ * precise control over memory layout and alignment. This is necessary
+ * for complex shader structs that don't map cleanly to Float32Array.
+ */
+interface ComplexUniformData extends BaseUniformData {
+  /**
+   * Write uniform data directly to a GPU buffer with full control.
+   *
+   * This method gives you complete control over memory layout, alignment,
+   * and data types. Use UniformBufferWriter for complex layouts that need
+   * to match WGSL struct alignment rules.
+   */
+  writeToBuffer(device: GPUDevice, buffer: GPUBuffer, offset?: number): void;
+}
+
+/**
+ * Union type for uniform data structures.
+ *
+ * Supports both simple float arrays and complex mixed-type structures.
+ * Each uniform class should implement exactly one of the two interfaces,
+ * never both.
+ */
+export type UniformData = SimpleUniformData | ComplexUniformData;
+
+/**
+ * Utility for writing complex uniform data with proper WebGPU alignment.
+ *
+ * WebGPU has strict alignment requirements for uniform buffers that match
+ * WGSL struct layout rules. This writer handles the alignment automatically
+ * so you don't have to calculate offsets manually.
+ *
+ * Example:
+ * ```ts
+ * const data = new ArrayBuffer(1024);
+ * const writer = new UniformBufferWriter(data);
+ * writer.writeFloat32(1.0);        // Basic float
+ * writer.writeVec3f(1, 2, 3);      // Vector with automatic padding
+ * writer.writeUint32(42);          // Integer type
+ * ```
  */
 export class UniformBufferWriter {
   private view: DataView;
@@ -61,12 +110,14 @@ export class UniformBufferWriter {
     this.offset += 4;
   }
 
+  /** Write a 2D vector with proper 8-byte alignment */
   public writeVec2f(x: number, y: number): void {
     this.alignTo(8); // vec2 alignment
     this.writeFloat32(x);
     this.writeFloat32(y);
   }
 
+  /** Write a 3D vector with vec4 alignment and padding */
   public writeVec3f(x: number, y: number, z: number): void {
     this.alignTo(16); // vec3 alignment (same as vec4)
     this.writeFloat32(x);
@@ -75,6 +126,7 @@ export class UniformBufferWriter {
     this.offset += 4; // padding
   }
 
+  /** Write a 4D vector with 16-byte alignment */
   public writeVec4f(x: number, y: number, z: number, w: number): void {
     this.alignTo(16); // vec4 alignment
     this.writeFloat32(x);
@@ -83,6 +135,7 @@ export class UniformBufferWriter {
     this.writeFloat32(w);
   }
 
+  /** Write a 4x4 matrix with proper alignment */
   public writeMat4x4f(matrix: Float32Array | number[]): void {
     this.alignTo(16); // mat4x4 alignment
     if (matrix.length !== 16) {
@@ -125,8 +178,17 @@ export class UniformBufferWriter {
 }
 
 /**
- * Manages a single uniform buffer with automatic sizing, reuse, and type safety.
- * Each pass should have its own UniformManager instance.
+ * Manages uniform buffers with automatic caching and change detection.
+ *
+ * Each compute pass should have its own UniformManager instance. The manager
+ * handles buffer creation, resizing, and caching to avoid unnecessary GPU
+ * uploads when uniform data hasn't changed.
+ *
+ * Features:
+ * - Smart caching based on data content hashing
+ * - Automatic buffer resizing when needed
+ * - Proper resource cleanup
+ * - Type safety through generics
  */
 export class UniformManager<T extends UniformData> {
   private buffer: GPUBuffer | null = null;
@@ -140,8 +202,15 @@ export class UniformManager<T extends UniformData> {
   ) {}
 
   /**
-   * Gets or creates a uniform buffer for the given data.
-   * Reuses the buffer if the data hasn't changed and size is compatible.
+   * Get a uniform buffer for the given data, creating or reusing as needed.
+   *
+   * This method is the main entry point for getting uniform buffers. It will:
+   * 1. Check if the data has changed using hash comparison
+   * 2. Reuse the existing buffer if data is unchanged and size fits
+   * 3. Create a new buffer if needed or resize if too small
+   * 4. Upload the data to the buffer
+   *
+   * The returned buffer is ready to bind to a compute pass.
    */
   public getBuffer(data: T): GPUBuffer {
     const dataHash = this.getDataHash(data);
@@ -165,7 +234,6 @@ export class UniformManager<T extends UniformData> {
       });
     }
 
-    // Write new data using the appropriate method
     this.writeDataToBuffer(data);
     this.lastDataHash = dataHash;
 
@@ -173,16 +241,8 @@ export class UniformManager<T extends UniformData> {
   }
 
   /**
-   * Forces a buffer update even if data hash matches.
-   * Useful for dynamic data that may have same values but needs refresh.
-   */
-  public forceUpdate(data: T): GPUBuffer {
-    this.lastDataHash = null;
-    return this.getBuffer(data);
-  }
-
-  /**
-   * Destroys the managed buffer. Should be called during cleanup.
+   * Clean up GPU resources.
+   * Should be called when the manager is no longer needed.
    */
   public destroy(): void {
     this.buffer?.destroy();
@@ -195,12 +255,12 @@ export class UniformManager<T extends UniformData> {
       throw new Error("Buffer not initialized");
     }
 
-    // Use custom writeToBuffer method if available
-    if (data.writeToBuffer) {
+    // Use custom writeToBuffer method if available (ComplexUniformData)
+    if ("writeToBuffer" in data) {
       data.writeToBuffer(this.device, this.buffer, 0);
     }
-    // Fallback to toFloat32Array for backward compatibility
-    else if (data.toFloat32Array) {
+    // Fallback to toFloat32Array for simple float-only uniforms (SimpleUniformData)
+    else if ("toFloat32Array" in data) {
       const floatArray = data.toFloat32Array();
       this.device.queue.writeBuffer(this.buffer, 0, floatArray);
     } else {
@@ -238,12 +298,20 @@ export class UniformManager<T extends UniformData> {
 }
 
 /**
- * Specific uniform data structures for different pass types.
- * These implement UniformData for type safety and automatic sizing.
+ * Predefined uniform data classes for common fluid simulation passes.
+ *
+ * These classes implement the UniformData interface and provide type-safe
+ * uniform management for specific compute passes. Each class handles the
+ * specific data layout and calculations needed for its corresponding shader.
  */
 
-export class AdvectionUniforms implements UniformData {
+/**
+ * Uniform data for advection passes (velocity and scalar transport).
+ * Contains timestep and advection strength parameters.
+ */
+export class AdvectionUniforms implements SimpleUniformData {
   readonly byteLength = 2 * 4; // 2 floats
+  private static readonly reusableArray = new Float32Array(2);
 
   constructor(
     public readonly timestep: number,
@@ -251,7 +319,9 @@ export class AdvectionUniforms implements UniformData {
   ) {}
 
   toFloat32Array(): Float32Array {
-    return new Float32Array([this.timestep, this.advectionFactor]);
+    AdvectionUniforms.reusableArray[0] = this.timestep;
+    AdvectionUniforms.reusableArray[1] = this.advectionFactor;
+    return AdvectionUniforms.reusableArray;
   }
 
   getHashData(): Float32Array {
@@ -259,8 +329,13 @@ export class AdvectionUniforms implements UniformData {
   }
 }
 
-export class DiffusionUniforms implements UniformData {
+/**
+ * Uniform data for diffusion passes (Jacobi iteration parameters).
+ * Automatically calculates alpha and rBeta values from timestep and diffusion factor.
+ */
+export class DiffusionUniforms implements SimpleUniformData {
   readonly byteLength = 2 * 4; // 2 floats
+  private static readonly reusableArray = new Float32Array(2);
 
   constructor(
     public readonly timestep: number,
@@ -270,7 +345,9 @@ export class DiffusionUniforms implements UniformData {
   toFloat32Array(): Float32Array {
     const alpha = 1 / this.diffusionFactor / this.timestep;
     const rBeta = 1.0 / (4.0 + alpha);
-    return new Float32Array([alpha, rBeta]);
+    DiffusionUniforms.reusableArray[0] = alpha;
+    DiffusionUniforms.reusableArray[1] = rBeta;
+    return DiffusionUniforms.reusableArray;
   }
 
   getHashData(): Float32Array {
@@ -278,14 +355,20 @@ export class DiffusionUniforms implements UniformData {
   }
 }
 
-export class DivergenceUniforms implements UniformData {
+/**
+ * Uniform data for divergence computation.
+ * Contains the grid scale factor for finite difference calculations.
+ */
+export class DivergenceUniforms implements SimpleUniformData {
   readonly byteLength = 1 * 4; // 1 float
+  private static readonly reusableArray = new Float32Array(1);
 
   constructor(public readonly gridScale: number) {}
 
   toFloat32Array(): Float32Array {
     const halfRdx = 0.5 / this.gridScale;
-    return new Float32Array([halfRdx]);
+    DivergenceUniforms.reusableArray[0] = halfRdx;
+    return DivergenceUniforms.reusableArray;
   }
 
   getHashData(): Float32Array {
@@ -293,8 +376,13 @@ export class DivergenceUniforms implements UniformData {
   }
 }
 
-export class PressureUniforms implements UniformData {
+/**
+ * Uniform data for pressure solving (Jacobi iteration for Poisson equation).
+ * Calculates alpha and rBeta parameters for the pressure Poisson equation.
+ */
+export class PressureUniforms implements SimpleUniformData {
   readonly byteLength = 2 * 4; // 2 floats
+  private static readonly reusableArray = new Float32Array(2);
 
   constructor(public readonly gridScale: number) {}
 
@@ -302,7 +390,9 @@ export class PressureUniforms implements UniformData {
     const rdx = 1.0 / this.gridScale;
     const alpha = -(rdx * rdx);
     const rBeta = 0.25;
-    return new Float32Array([alpha, rBeta]);
+    PressureUniforms.reusableArray[0] = alpha;
+    PressureUniforms.reusableArray[1] = rBeta;
+    return PressureUniforms.reusableArray;
   }
 
   getHashData(): Float32Array {
@@ -310,14 +400,20 @@ export class PressureUniforms implements UniformData {
   }
 }
 
-export class GradientSubtractionUniforms implements UniformData {
+/**
+ * Uniform data for gradient subtraction (pressure projection).
+ * Contains grid scale for computing pressure gradient.
+ */
+export class GradientSubtractionUniforms implements SimpleUniformData {
   readonly byteLength = 1 * 4; // 1 float
+  private static readonly reusableArray = new Float32Array(1);
 
   constructor(public readonly gridScale: number) {}
 
   toFloat32Array(): Float32Array {
     const halfRdx = 0.5 / this.gridScale;
-    return new Float32Array([halfRdx]);
+    GradientSubtractionUniforms.reusableArray[0] = halfRdx;
+    return GradientSubtractionUniforms.reusableArray;
   }
 
   getHashData(): Float32Array {
@@ -325,8 +421,13 @@ export class GradientSubtractionUniforms implements UniformData {
   }
 }
 
-export class BoundaryUniforms implements UniformData {
+/**
+ * Uniform data for boundary conditions.
+ * Specifies the type of boundary condition and optional scale factor.
+ */
+export class BoundaryUniforms implements SimpleUniformData {
   readonly byteLength = 2 * 4; // 2 floats
+  private static readonly reusableArray = new Float32Array(2);
 
   constructor(
     public readonly boundaryType: number,
@@ -334,7 +435,9 @@ export class BoundaryUniforms implements UniformData {
   ) {}
 
   toFloat32Array(): Float32Array {
-    return new Float32Array([this.boundaryType, this.scale]);
+    BoundaryUniforms.reusableArray[0] = this.boundaryType;
+    BoundaryUniforms.reusableArray[1] = this.scale;
+    return BoundaryUniforms.reusableArray;
   }
 
   getHashData(): Float32Array {
@@ -342,8 +445,13 @@ export class BoundaryUniforms implements UniformData {
   }
 }
 
-export class AddSmokeUniforms implements UniformData {
+/**
+ * Uniform data for adding smoke at a specific location.
+ * Contains position, radius, and intensity parameters for interactive smoke injection.
+ */
+export class AddSmokeUniforms implements SimpleUniformData {
   readonly byteLength = 4 * 4; // 4 floats
+  private static readonly reusableArray = new Float32Array(4);
 
   constructor(
     public readonly positionX: number,
@@ -353,12 +461,11 @@ export class AddSmokeUniforms implements UniformData {
   ) {}
 
   toFloat32Array(): Float32Array {
-    return new Float32Array([
-      this.positionX,
-      this.positionY,
-      this.radius,
-      this.intensity,
-    ]);
+    AddSmokeUniforms.reusableArray[0] = this.positionX;
+    AddSmokeUniforms.reusableArray[1] = this.positionY;
+    AddSmokeUniforms.reusableArray[2] = this.radius;
+    AddSmokeUniforms.reusableArray[3] = this.intensity;
+    return AddSmokeUniforms.reusableArray;
   }
 
   getHashData(): Float32Array {
@@ -366,8 +473,13 @@ export class AddSmokeUniforms implements UniformData {
   }
 }
 
-export class AddVelocityUniforms implements UniformData {
+/**
+ * Uniform data for adding velocity based on mouse interaction.
+ * Contains position, velocity direction, radius, and intensity for fluid stirring.
+ */
+export class AddVelocityUniforms implements SimpleUniformData {
   readonly byteLength = 6 * 4; // 6 floats
+  private static readonly reusableArray = new Float32Array(6);
 
   constructor(
     public readonly positionX: number,
@@ -379,14 +491,13 @@ export class AddVelocityUniforms implements UniformData {
   ) {}
 
   toFloat32Array(): Float32Array {
-    return new Float32Array([
-      this.positionX,
-      this.positionY,
-      this.velocityX,
-      this.velocityY,
-      this.radius,
-      this.intensity,
-    ]);
+    AddVelocityUniforms.reusableArray[0] = this.positionX;
+    AddVelocityUniforms.reusableArray[1] = this.positionY;
+    AddVelocityUniforms.reusableArray[2] = this.velocityX;
+    AddVelocityUniforms.reusableArray[3] = this.velocityY;
+    AddVelocityUniforms.reusableArray[4] = this.radius;
+    AddVelocityUniforms.reusableArray[5] = this.intensity;
+    return AddVelocityUniforms.reusableArray;
   }
 
   getHashData(): Float32Array {
@@ -394,13 +505,19 @@ export class AddVelocityUniforms implements UniformData {
   }
 }
 
-export class DissipationUniforms implements UniformData {
+/**
+ * Uniform data for dissipation passes.
+ * Contains a single dissipation factor for gradually reducing field values over time.
+ */
+export class DissipationUniforms implements SimpleUniformData {
   readonly byteLength = 1 * 4; // 1 float
+  private static readonly reusableArray = new Float32Array(1);
 
   constructor(public readonly dissipationFactor: number) {}
 
   toFloat32Array(): Float32Array {
-    return new Float32Array([this.dissipationFactor]);
+    DissipationUniforms.reusableArray[0] = this.dissipationFactor;
+    return DissipationUniforms.reusableArray;
   }
 
   getHashData(): Float32Array {
@@ -408,64 +525,14 @@ export class DissipationUniforms implements UniformData {
   }
 }
 
-// Example of complex uniform with mixed data types
-export class ComplexShaderUniforms implements UniformData {
-  readonly byteLength = 64; // Calculated based on WebGPU alignment rules
-
-  constructor(
-    public readonly viewMatrix: Float32Array, // mat4x4 - 64 bytes
-    public readonly lightCount: number, // u32 - 4 bytes
-    public readonly time: number, // f32 - 4 bytes
-    public readonly cameraPosition: [number, number, number], // vec3 - 12 bytes + 4 padding
-    public readonly flags: number // u32 - 4 bytes
-  ) {
-    if (viewMatrix.length !== 16) {
-      throw new Error("View matrix must be 4x4 (16 elements)");
-    }
-  }
-
-  // Use custom buffer writing for complex layout
-  writeToBuffer(
-    device: GPUDevice,
-    buffer: GPUBuffer,
-    offset: number = 0
-  ): void {
-    const data = new ArrayBuffer(this.byteLength);
-    const writer = new UniformBufferWriter(data);
-
-    // Write mat4x4 (aligned to 16 bytes)
-    writer.writeMat4x4f(this.viewMatrix);
-
-    // Write u32 light count (aligned to 4 bytes)
-    writer.writeUint32(this.lightCount);
-
-    // Write f32 time (aligned to 4 bytes)
-    writer.writeFloat32(this.time);
-
-    // Write vec3 camera position (aligned to 16 bytes, with padding)
-    writer.writeVec3f(...this.cameraPosition);
-
-    // Write u32 flags (aligned to 4 bytes)
-    writer.writeUint32(this.flags);
-
-    device.queue.writeBuffer(buffer, offset, data);
-  }
-
-  getHashData(): string {
-    // Create a hash from all the data
-    const parts = [
-      Array.from(this.viewMatrix).join(","),
-      this.lightCount.toString(),
-      this.time.toString(),
-      this.cameraPosition.join(","),
-      this.flags.toString(),
-    ];
-    return parts.join("|");
-  }
-}
-
-// Example of uniform with dynamic arrays
-export class LightArrayUniforms implements UniformData {
+/**
+ * Example of complex uniform data with dynamic arrays and mixed types.
+ *
+ * This demonstrates how to use ComplexUniformData for advanced scenarios
+ * like lighting systems with variable numbers of lights and proper alignment.
+ * Most fluid simulation passes won't need this complexity.
+ */
+export class LightArrayUniforms implements ComplexUniformData {
   readonly byteLength: number;
 
   constructor(

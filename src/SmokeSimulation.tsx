@@ -13,7 +13,6 @@ import {
   DivergencePass,
   GradientSubtractionPass,
   PressurePass,
-  UniformBufferUtils,
   SmokeAdvectionPasss,
   SmokeDiffusionPass,
   BoundaryConditionsPass,
@@ -23,6 +22,17 @@ import {
   SmokeDissipationPass,
   VelocityDissipationPass,
 } from "./passes/SimulationPasses";
+import {
+  AdvectionUniforms,
+  DiffusionUniforms,
+  DivergenceUniforms,
+  PressureUniforms,
+  GradientSubtractionUniforms,
+  BoundaryUniforms,
+  AddSmokeUniforms,
+  AddVelocityUniforms,
+  DissipationUniforms,
+} from "./utils/UniformManager";
 
 // Configuration types for persistent settings
 export interface SmokeSimulationConfig {
@@ -38,12 +48,12 @@ export const GRID_SIZE = {
   width: 2 ** 9,
   height: 2 ** 9,
 };
-const GRID_SCALE = 0.8;
+const GRID_SCALE = 1;
 const WORKGROUP_SIZE = 16;
 const WORKGROUP_COUNT = Math.ceil(GRID_SIZE.width / WORKGROUP_SIZE);
 // const VISCOSITY = 1;
 
-const DIFFUSION_FACTOR = 10; // Smaller = slower diffusion
+const DIFFUSION_FACTOR = 1; // Smaller = slower diffusion
 const VELOCITY_ADVECTION = 10; // Smaller = slower velocity advection
 const SMOKE_ADVECTION = 20;
 const SMOKE_DIFFUSION = 1;
@@ -62,6 +72,8 @@ const SMOKE_PARTICLE_DIMENSIONS = {
   width: GRID_SIZE.width,
   height: GRID_SIZE.height,
 };
+
+// Alternate setting for more fine-grid performance testing
 
 // TODO: Refactor into its own file-- maybe let them be modified.
 // export const GRID_SIZE = {
@@ -389,37 +401,27 @@ class SmokeSimulation {
 
     if (!renderOnly) {
       // Step 1: Advection
-      const advectionUniforms = UniformBufferUtils.createAdvectionUniforms(
+      const advectionUniforms = new AdvectionUniforms(
         TIMESTEP,
         VELOCITY_ADVECTION
-      );
-      const advectionBuffer = this.createUniformBuffer(
-        advectionUniforms,
-        "Advection"
       );
 
       const advectionPassEncoder = commandEncoder.beginComputePass({
         label: "Advection Compute Pass",
       });
-      this.advectionPass.execute(
+      this.advectionPass.executeWithUniforms(
         advectionPassEncoder,
-        {
-          textureManager: this.textureManager,
-          uniformBuffer: advectionBuffer,
-        },
+        advectionUniforms,
+        this.textureManager,
         WORKGROUP_COUNT
       );
       advectionPassEncoder.end();
       this.textureManager.swap("velocity");
 
       // Step 2: Diffusion
-      const diffusionUniforms = UniformBufferUtils.createDiffusionUniforms(
+      const diffusionUniforms = new DiffusionUniforms(
         TIMESTEP,
         DIFFUSION_FACTOR
-      );
-      const diffusionBuffer = this.createUniformBuffer(
-        diffusionUniforms,
-        "Diffusion"
       );
 
       const diffusionPassEncoder = commandEncoder.beginComputePass({
@@ -427,10 +429,8 @@ class SmokeSimulation {
       });
       this.diffusionPass.executeIterations(
         diffusionPassEncoder,
-        {
-          textureManager: this.textureManager,
-          uniformBuffer: diffusionBuffer,
-        },
+        diffusionUniforms,
+        this.textureManager,
         WORKGROUP_COUNT,
         DIFFUSION_ITERATIONS
       );
@@ -438,43 +438,29 @@ class SmokeSimulation {
       // Note: Diffusion pass handles its own texture swapping
 
       // Step 3: Divergence
-      const divergenceUniforms =
-        UniformBufferUtils.createDivergenceUniforms(GRID_SCALE);
-      const divergenceBuffer = this.createUniformBuffer(
-        divergenceUniforms,
-        "Divergence"
-      );
+      const divergenceUniforms = new DivergenceUniforms(GRID_SCALE);
 
       const divergencePassEncoder = commandEncoder.beginComputePass({
         label: "Divergence Compute Pass",
       });
-      this.divergencePass.execute(
+      this.divergencePass.executeWithUniforms(
         divergencePassEncoder,
-        {
-          textureManager: this.textureManager,
-          uniformBuffer: divergenceBuffer,
-        },
+        divergenceUniforms,
+        this.textureManager,
         WORKGROUP_COUNT
       );
       divergencePassEncoder.end();
 
       // Step 4: Pressure Projection
-      const pressureUniforms =
-        UniformBufferUtils.createPressureUniforms(GRID_SCALE);
-      const pressureBuffer = this.createUniformBuffer(
-        pressureUniforms,
-        "Pressure"
-      );
+      const pressureUniforms = new PressureUniforms(GRID_SCALE);
 
       const pressurePassEncoder = commandEncoder.beginComputePass({
         label: "Pressure Compute Pass",
       });
       this.pressurePass.executeIterations(
         pressurePassEncoder,
-        {
-          textureManager: this.textureManager,
-          uniformBuffer: pressureBuffer,
-        },
+        pressureUniforms,
+        this.textureManager,
         WORKGROUP_COUNT,
         PRESSURE_ITERATIONS
       );
@@ -482,9 +468,8 @@ class SmokeSimulation {
       // Note: Pressure pass handles its own texture swapping
 
       // Step 4.5: Pressure Boundary Conditions (Neumann)
-      const pressureBoundaryBuffer = this.createUniformBuffer(
-        UniformBufferUtils.createBoundaryUniforms(BoundaryType.SCALAR_NEUMANN),
-        "Pressure Boundary"
+      const pressureBoundaryUniforms = new BoundaryUniforms(
+        BoundaryType.SCALAR_NEUMANN
       );
       const pressureBoundaryPassEncoder = commandEncoder.beginComputePass({
         label: "Pressure Boundary Conditions Compute Pass",
@@ -492,43 +477,31 @@ class SmokeSimulation {
       this.boundaryConditionsPass.executeForTexture(
         pressureBoundaryPassEncoder,
         "pressure",
-        {
-          textureManager: this.textureManager,
-          uniformBuffer: pressureBoundaryBuffer,
-        },
+        pressureBoundaryUniforms,
+        this.textureManager,
         WORKGROUP_COUNT
       );
       pressureBoundaryPassEncoder.end();
       this.textureManager.swap("pressure");
 
       // Step 5: Gradient Subtraction
-      const gradientUniforms =
-        UniformBufferUtils.createGradientSubtractionUniforms(GRID_SCALE);
-      const gradientBuffer = this.createUniformBuffer(
-        gradientUniforms,
-        "Gradient"
-      );
+      const gradientUniforms = new GradientSubtractionUniforms(GRID_SCALE);
 
       const gradientPassEncoder = commandEncoder.beginComputePass({
         label: "Gradient Subtraction Compute Pass",
       });
-      this.gradientSubtractionPass.execute(
+      this.gradientSubtractionPass.executeWithUniforms(
         gradientPassEncoder,
-        {
-          textureManager: this.textureManager,
-          uniformBuffer: gradientBuffer,
-        },
+        gradientUniforms,
+        this.textureManager,
         WORKGROUP_COUNT
       );
       gradientPassEncoder.end();
       this.textureManager.swap("velocity");
 
       // Step 6: Velocity Boundary Conditions (No-slip)
-      const velocityBoundaryBuffer = this.createUniformBuffer(
-        UniformBufferUtils.createBoundaryUniforms(
-          BoundaryType.NO_SLIP_VELOCITY
-        ),
-        "Velocity Boundary"
+      const velocityBoundaryUniforms = new BoundaryUniforms(
+        BoundaryType.NO_SLIP_VELOCITY
       );
       const velocityBoundaryPassEncoder = commandEncoder.beginComputePass({
         label: "Velocity Boundary Conditions Compute Pass",
@@ -536,59 +509,49 @@ class SmokeSimulation {
       this.boundaryConditionsPass.executeForTexture(
         velocityBoundaryPassEncoder,
         "velocity",
-        {
-          textureManager: this.textureManager,
-          uniformBuffer: velocityBoundaryBuffer,
-        },
+        velocityBoundaryUniforms,
+        this.textureManager,
         WORKGROUP_COUNT
       );
       velocityBoundaryPassEncoder.end();
       this.textureManager.swap("velocity");
 
       // Velocity Dissipation Pass - Apply dissipation to gradually reduce velocity
-      const velocityDissipationBuffer = this.createUniformBuffer(
-        UniformBufferUtils.createDissipationUniforms(
-          VELOCITY_DISSIPATION_FACTOR
-        ),
-        "Velocity Dissipation UBO"
+      const velocityDissipationUniforms = new DissipationUniforms(
+        VELOCITY_DISSIPATION_FACTOR
       );
       const velocityDissipationPassEncoder = commandEncoder.beginComputePass({
         label: "Velocity Dissipation Compute Pass",
       });
-      this.velocityDissipationPass.execute(
+      this.velocityDissipationPass.executeWithUniforms(
         velocityDissipationPassEncoder,
-        {
-          textureManager: this.textureManager,
-          uniformBuffer: velocityDissipationBuffer,
-        },
+        velocityDissipationUniforms,
+        this.textureManager,
         WORKGROUP_COUNT
       );
       velocityDissipationPassEncoder.end();
       this.textureManager.swap("velocity");
 
       // Smoke Advection Pass
-      const smokeAdvectionBuffer = this.createUniformBuffer(
-        UniformBufferUtils.createAdvectionUniforms(TIMESTEP, SMOKE_ADVECTION),
-        "Smoke Advection UBO"
+      const smokeAdvectionUniforms = new AdvectionUniforms(
+        TIMESTEP,
+        SMOKE_ADVECTION
       );
       const smokeDensityPassEncoder = commandEncoder.beginComputePass({
         label: "Smoke Density Advection Compute Pass",
       });
-      this.smokeAdvectionPass.execute(
+      this.smokeAdvectionPass.executeWithUniforms(
         smokeDensityPassEncoder,
-        {
-          textureManager: this.textureManager,
-          uniformBuffer: smokeAdvectionBuffer,
-        },
+        smokeAdvectionUniforms,
+        this.textureManager,
         WORKGROUP_COUNT
       );
       smokeDensityPassEncoder.end();
       this.textureManager.swap("smokeDensity");
 
       // Smoke Density Boundary Conditions (Neumann)
-      const smokeBoundaryBuffer = this.createUniformBuffer(
-        UniformBufferUtils.createBoundaryUniforms(BoundaryType.SCALAR_NEUMANN),
-        "Smoke Boundary"
+      const smokeBoundaryUniforms = new BoundaryUniforms(
+        BoundaryType.SCALAR_NEUMANN
       );
       const smokeBoundaryPassEncoder = commandEncoder.beginComputePass({
         label: "Smoke Boundary Conditions Compute Pass",
@@ -596,29 +559,25 @@ class SmokeSimulation {
       this.boundaryConditionsPass.executeForTexture(
         smokeBoundaryPassEncoder,
         "smokeDensity",
-        {
-          textureManager: this.textureManager,
-          uniformBuffer: smokeBoundaryBuffer,
-        },
+        smokeBoundaryUniforms,
+        this.textureManager,
         WORKGROUP_COUNT
       );
       smokeBoundaryPassEncoder.end();
       this.textureManager.swap("smokeDensity");
     }
 
-    const smokeDiffusionBuffer = this.createUniformBuffer(
-      UniformBufferUtils.createDiffusionUniforms(TIMESTEP, SMOKE_DIFFUSION),
-      "Smoke Diffusion UBO"
+    const smokeDiffusionUniforms = new DiffusionUniforms(
+      TIMESTEP,
+      SMOKE_DIFFUSION
     );
     const smokeDiffusionPassEncoder = commandEncoder.beginComputePass({
       label: "Smoke Density Diffusion Compute Pass",
     });
     this.smokeDiffusionPass.executeIterations(
       smokeDiffusionPassEncoder,
-      {
-        textureManager: this.textureManager,
-        uniformBuffer: smokeDiffusionBuffer,
-      },
+      smokeDiffusionUniforms,
+      this.textureManager,
       WORKGROUP_COUNT,
       DIFFUSION_ITERATIONS
     );
@@ -626,19 +585,16 @@ class SmokeSimulation {
     this.textureManager.swap("smokeDensity");
 
     // Smoke Dissipation Pass
-    const smokeDissipationBuffer = this.createUniformBuffer(
-      UniformBufferUtils.createDissipationUniforms(SMOKE_DISSIPATION_FACTOR),
-      "Smoke Dissipation UBO"
+    const smokeDissipationUniforms = new DissipationUniforms(
+      SMOKE_DISSIPATION_FACTOR
     );
     const smokeDissipationPassEncoder = commandEncoder.beginComputePass({
       label: "Smoke Density Dissipation Compute Pass",
     });
-    this.smokeDissipationPass.execute(
+    this.smokeDissipationPass.executeWithUniforms(
       smokeDissipationPassEncoder,
-      {
-        textureManager: this.textureManager,
-        uniformBuffer: smokeDissipationBuffer,
-      },
+      smokeDissipationUniforms,
+      this.textureManager,
       WORKGROUP_COUNT
     );
     smokeDissipationPassEncoder.end();
@@ -712,26 +668,20 @@ class SmokeSimulation {
 
     const commandEncoder = this.resources.device.createCommandEncoder();
 
-    const addSmokeUniforms = UniformBufferUtils.createAddSmokeUniforms(
+    const addSmokeUniforms = new AddSmokeUniforms(
       x,
       y,
       INTERACTION_RADIUS,
       SMOKE_INTENSITY
     );
-    const addSmokeBuffer = this.createUniformBuffer(
-      addSmokeUniforms,
-      "Add Smoke"
-    );
 
     const addSmokePassEncoder = commandEncoder.beginComputePass({
       label: "Add Smoke Compute Pass",
     });
-    this.addSmokePass.execute(
+    this.addSmokePass.executeWithUniforms(
       addSmokePassEncoder,
-      {
-        textureManager: this.textureManager,
-        uniformBuffer: addSmokeBuffer,
-      },
+      addSmokeUniforms,
+      this.textureManager,
       WORKGROUP_COUNT
     );
     addSmokePassEncoder.end();
@@ -757,7 +707,7 @@ class SmokeSimulation {
 
     const commandEncoder = this.resources.device.createCommandEncoder();
 
-    const addVelocityUniforms = UniformBufferUtils.createAddVelocityUniforms(
+    const addVelocityUniforms = new AddVelocityUniforms(
       x,
       y,
       velocityX,
@@ -765,20 +715,14 @@ class SmokeSimulation {
       INTERACTION_RADIUS,
       VELOCITY_INTENSITY
     );
-    const addVelocityBuffer = this.createUniformBuffer(
-      addVelocityUniforms,
-      "Add Velocity"
-    );
 
     const addVelocityPassEncoder = commandEncoder.beginComputePass({
       label: "Add Velocity Compute Pass",
     });
-    this.addVelocityPass.execute(
+    this.addVelocityPass.executeWithUniforms(
       addVelocityPassEncoder,
-      {
-        textureManager: this.textureManager,
-        uniformBuffer: addVelocityBuffer,
-      },
+      addVelocityUniforms,
+      this.textureManager,
       WORKGROUP_COUNT
     );
     addVelocityPassEncoder.end();
@@ -787,14 +731,23 @@ class SmokeSimulation {
     this.resources.device.queue.submit([commandEncoder.finish()]);
   }
 
-  private createUniformBuffer(data: Float32Array, label: string): GPUBuffer {
-    const buffer = this.resources!.device.createBuffer({
-      label: `${label} Uniform Buffer`,
-      size: data.byteLength,
-      usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
-    });
-    this.resources!.device.queue.writeBuffer(buffer, 0, data);
-    return buffer;
+  public destroy(): void {
+    // Destroy all pass uniform managers
+    this.advectionPass?.destroy();
+    this.smokeAdvectionPass?.destroy();
+    this.smokeDiffusionPass?.destroy();
+    this.smokeDissipationPass?.destroy();
+    this.velocityDissipationPass?.destroy();
+    this.diffusionPass?.destroy();
+    this.divergencePass?.destroy();
+    this.pressurePass?.destroy();
+    this.gradientSubtractionPass?.destroy();
+    this.boundaryConditionsPass?.destroy();
+    this.addSmokePass?.destroy();
+    this.addVelocityPass?.destroy();
+
+    // Reset state
+    this.isInitialized = false;
   }
 }
 
