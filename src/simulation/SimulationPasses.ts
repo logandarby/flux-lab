@@ -1,6 +1,5 @@
 import { ComputePass, type BindGroupArgs } from "../utils/ComputePass";
 import { injectShaderVariables } from "../utils/webgpu.utils";
-import type { SmokeTextureID } from "../SmokeSimulation";
 import type { TextureManager } from "../utils/TextureManager";
 import {
   UniformManager,
@@ -18,13 +17,13 @@ import {
 
 import advectionShaderTemplate from "../shaders/advectionShader.wgsl?raw";
 import jacobiIterationShaderTemplate from "../shaders/jacobiIteration.wgsl?raw";
-// import pressureJacobiShader from "../shaders/pressureJacobi.wgsl?raw";
 import divergenceShaderTemplate from "../shaders/divergenceShader.wgsl?raw";
 import gradientSubtractionShaderTemplate from "../shaders/gradientSubtractionShader.wgsl?raw";
 import boundaryConditionsShaderTemplate from "../shaders/boundaryConditionsShader.wgsl?raw";
 import addSmokeShaderTemplate from "../shaders/addSmokeShader.wgsl?raw";
 import addVelocityShaderTemplate from "../shaders/addVelocityShader.wgsl?raw";
 import dissipationShaderTemplate from "../shaders/dissipationShader.wgsl?raw";
+import type { SmokeTextureID } from "./constants";
 
 /**
  * Boundary condition types for fluid simulation.

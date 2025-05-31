@@ -1,12 +1,10 @@
 import { useCallback, useRef } from "react";
 import { useEffect, useState } from "react";
 import { ShaderMode } from "../utils/RenderPass";
-import SimulationControls from "./ui/SimulationControls";
-import SmokeSimulation, {
-  GRID_SIZE,
-  type SmokeTextureID,
-} from "../SmokeSimulation";
+import SimulationControls from "../components/ui/SimulationControls";
 import { usePersistedState } from "../utils/localStorage.utils";
+import { type SmokeTextureID, SIMULATION_CONSTANTS } from "./constants";
+import SmokeSimulation from "./SmokeSimulation";
 
 const CANVAS_HEIGHT = 512;
 const CANVAS_WIDTH = CANVAS_HEIGHT;
@@ -134,9 +132,10 @@ function SmokeSimulationComponent() {
     const canvasY = clientY - rect.top;
 
     // Scale to grid coordinates
-    const gridX = (canvasX / rect.width) * GRID_SIZE.width;
+    const gridX = (canvasX / rect.width) * SIMULATION_CONSTANTS.grid.size.width;
     // Note: Y coordinate should NOT be flipped since both canvas and WebGPU use top-left origin
-    const gridY = (canvasY / rect.height) * GRID_SIZE.height;
+    const gridY =
+      (canvasY / rect.height) * SIMULATION_CONSTANTS.grid.size.height;
 
     return { x: gridX, y: gridY };
   }, []);

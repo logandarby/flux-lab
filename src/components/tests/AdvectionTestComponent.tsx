@@ -9,7 +9,7 @@ import {
   initializeWebGPU,
   injectShaderVariables,
 } from "@/utils/webgpu.utils";
-import { type SmokeTextureID } from "@/SmokeSimulation";
+import { type SmokeTextureID } from "@/simulation/SmokeSimulation";
 import { ComputePass, type BindGroupArgs } from "@/utils/ComputePass";
 import advectionShaderTemplate from "../../shaders/advectionShader.wgsl?raw";
 import { RenderPass, ShaderMode } from "@/utils/RenderPass";
