@@ -66,28 +66,64 @@ fn shadePressure(value: f32, input: VertexOutput) -> vec4f {
 }
 
 fn shadeDensity(value: f32, input: VertexOutput) -> vec4f {
-    // Smoke Density
-    let purple = vec4f(172, 247, 242, 256) / 256.0;
-    let blue = vec4f(198, 135, 255, 256) / 256.0;
-    return vec4f(mix(purple, blue, vec4f(value)).xyz * value, value);
+    let density = clamp(value, 0.0, 1.0);
+    
+    let color1 = vec3f(0.05, 0.05, 0.15);
+    let color2 = vec3f(0.15, 0.05, 0.35);
+    let color3 = vec3f(0.45, 0.15, 0.65);
+    let color4 = vec3f(0.65, 0.35, 0.85);
+    let color5 = vec3f(0.75, 0.65, 0.95);
+    let color6 = vec3f(0.95, 0.95, 1.0);
+    
+    var finalColor: vec3f;
+    
+    // Multi-stop gradient interpolation
+    if (density < 0.2) {
+        let t = density / 0.2;
+        finalColor = mix(color1, color2, t);
+    } else if (density < 0.4) {
+        let t = (density - 0.2) / 0.2;
+        finalColor = mix(color2, color3, t);
+    } else if (density < 0.6) {
+        let t = (density - 0.4) / 0.2;
+        finalColor = mix(color3, color4, t);
+    } else if (density < 0.8) {
+        let t = (density - 0.6) / 0.2;
+        finalColor = mix(color4, color5, t);
+    } else {
+        let t = (density - 0.8) / 0.2;
+        finalColor = mix(color5, color6, t);
+    }
+    
+    // Add some subtle brightness boost for glow effect
+    let brightness = 1.0 + density * 0.3;
+    // finalColor = finalColor * brightness;
+    
+    // Smooth alpha transition - more transparent at low densities
+    let alpha = density * density * (3.0 - 2.0 * density); // Smoothstep
+    
+    return vec4f(finalColor, alpha);
 }
 
 @fragment
 fn fragment_main(input: VertexOutput) -> @location(0)vec4f {
     let value = textureSample(texture, textureSampler, input.texCoord);
 
+    var output: vec4f;
+
     switch uniformInput.shaderMode {
         case 0: {
-            return shadeVelocity(value.xy, input);
+            output = shadeVelocity(value.xy, input);
         }
         case 1: {
-            return shadePressure(value.x, input);
+            output = shadePressure(value.x, input);
         }
         case 2: {
-            return shadeDensity(value.x, input);
+            output = shadeDensity(value.x, input);
         }
         default: {
-            return vec4(1, 1, 1, 1);
+            output = vec4(1, 1, 1, 1);
         }
     }
+    return output;
 }

@@ -8,6 +8,8 @@ import jacobiIterationShaderTemplate from "../shaders/jacobiIteration.wgsl?raw";
 import divergenceShaderTemplate from "../shaders/divergenceShader.wgsl?raw";
 import gradientSubtractionShaderTemplate from "../shaders/gradientSubtractionShader.wgsl?raw";
 import boundaryConditionsShaderTemplate from "../shaders/boundaryConditionsShader.wgsl?raw";
+import addSmokeShaderTemplate from "../shaders/addSmokeShader.wgsl?raw";
+import addVelocityShaderTemplate from "../shaders/addVelocityShader.wgsl?raw";
 
 // Boundary condition types
 export enum BoundaryType {
@@ -916,5 +918,182 @@ export class UniformBufferUtils {
     scale: number = 1.0
   ): Float32Array {
     return new Float32Array([boundaryType, scale]);
+  }
+
+  public static createAddSmokeUniforms(
+    positionX: number,
+    positionY: number,
+    radius: number,
+    intensity: number
+  ): Float32Array {
+    return new Float32Array([positionX, positionY, radius, intensity]);
+  }
+
+  public static createAddVelocityUniforms(
+    positionX: number,
+    positionY: number,
+    velocityX: number,
+    velocityY: number,
+    radius: number,
+    intensity: number
+  ): Float32Array {
+    return new Float32Array([
+      positionX,
+      positionY,
+      velocityX,
+      velocityY,
+      radius,
+      intensity,
+    ]);
+  }
+}
+
+/**
+ * Adds smoke density at a specific position
+ */
+export class AddSmokePass extends ComputePass<SmokeTextureID> {
+  constructor(device: GPUDevice, workgroupSize: number) {
+    super(
+      {
+        name: "Add Smoke",
+        entryPoint: "compute_main",
+        shader: device.createShaderModule({
+          label: "Add Smoke Shader",
+          code: injectShaderVariables(addSmokeShaderTemplate, {
+            WORKGROUP_SIZE: workgroupSize,
+          }),
+        }),
+      },
+      device
+    );
+  }
+
+  protected createBindGroupLayout(): GPUBindGroupLayout {
+    return this.device.createBindGroupLayout({
+      label: "Add Smoke Bind Group Layout",
+      entries: [
+        {
+          binding: 0,
+          visibility: GPUShaderStage.COMPUTE,
+          texture: { sampleType: "unfilterable-float", viewDimension: "2d" },
+        },
+        {
+          binding: 1,
+          visibility: GPUShaderStage.COMPUTE,
+          storageTexture: {
+            format: "r32float",
+            access: "write-only",
+            viewDimension: "2d",
+          },
+        },
+        {
+          binding: 2,
+          visibility: GPUShaderStage.COMPUTE,
+          buffer: { type: "uniform" },
+        },
+      ],
+    });
+  }
+
+  protected createBindGroup(args: BindGroupArgs<SmokeTextureID>): GPUBindGroup {
+    this.validateArgs(args, ["textureManager", "uniformBuffer"]);
+
+    return this.device.createBindGroup({
+      label: "Add Smoke Bind Group",
+      layout: this.bindGroupLayout,
+      entries: [
+        {
+          binding: 0,
+          resource: args
+            .textureManager!.getCurrentTexture("smokeDensity")
+            .createView(),
+        },
+        {
+          binding: 1,
+          resource: args
+            .textureManager!.getBackTexture("smokeDensity")
+            .createView(),
+        },
+        {
+          binding: 2,
+          resource: { buffer: args.uniformBuffer! },
+        },
+      ],
+    });
+  }
+}
+
+/**
+ * Adds velocity at a specific position based on mouse movement
+ */
+export class AddVelocityPass extends ComputePass<SmokeTextureID> {
+  constructor(device: GPUDevice, workgroupSize: number) {
+    super(
+      {
+        name: "Add Velocity",
+        entryPoint: "compute_main",
+        shader: device.createShaderModule({
+          label: "Add Velocity Shader",
+          code: injectShaderVariables(addVelocityShaderTemplate, {
+            WORKGROUP_SIZE: workgroupSize,
+          }),
+        }),
+      },
+      device
+    );
+  }
+
+  protected createBindGroupLayout(): GPUBindGroupLayout {
+    return this.device.createBindGroupLayout({
+      label: "Add Velocity Bind Group Layout",
+      entries: [
+        {
+          binding: 0,
+          visibility: GPUShaderStage.COMPUTE,
+          texture: { sampleType: "unfilterable-float", viewDimension: "2d" },
+        },
+        {
+          binding: 1,
+          visibility: GPUShaderStage.COMPUTE,
+          storageTexture: {
+            format: "rg32float",
+            access: "write-only",
+            viewDimension: "2d",
+          },
+        },
+        {
+          binding: 2,
+          visibility: GPUShaderStage.COMPUTE,
+          buffer: { type: "uniform" },
+        },
+      ],
+    });
+  }
+
+  protected createBindGroup(args: BindGroupArgs<SmokeTextureID>): GPUBindGroup {
+    this.validateArgs(args, ["textureManager", "uniformBuffer"]);
+
+    return this.device.createBindGroup({
+      label: "Add Velocity Bind Group",
+      layout: this.bindGroupLayout,
+      entries: [
+        {
+          binding: 0,
+          resource: args
+            .textureManager!.getCurrentTexture("velocity")
+            .createView(),
+        },
+        {
+          binding: 1,
+          resource: args
+            .textureManager!.getBackTexture("velocity")
+            .createView(),
+        },
+        {
+          binding: 2,
+          resource: { buffer: args.uniformBuffer! },
+        },
+      ],
+    });
   }
 }

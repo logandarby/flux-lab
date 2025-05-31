@@ -6,7 +6,7 @@ import {
   Outlet,
   useParams,
 } from "@tanstack/react-router";
-import SmokeSimulationComponent from "./SmokeSimulation";
+import SmokeSimulationComponent from "./components/SmokeSimulationComponent";
 import TestsPage from "./pages/TestsPage";
 import AdvectionTestComponent from "./components/tests/AdvectionTestComponent";
 import DiffusionTestComponent from "./components/tests/DiffusionTestComponent";

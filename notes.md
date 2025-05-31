@@ -85,6 +85,10 @@ u = subtractPressureGradient(u, p);
 - maybe everything is sustained normally by default
   - vorticity around notes creates an ARP effect
 
+**Different Presets** different colours
+
+- key success to patatap
+
 ### Possible technology to get audio
 
 - tidal/strudel
