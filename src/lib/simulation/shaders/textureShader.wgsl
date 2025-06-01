@@ -121,7 +121,7 @@ fn rand(co: vec2f) -> f32 {
 }
 
 fn gaussrand(co: vec2f) -> vec4f {
-    let PI = 3.141592653589793238462;
+    @define PI 3.141592653589793238462
     let offsets = uniformInput.offsets;
     let U = rand(co + vec2(offsets.x, offsets.x));
     let V = rand(co + vec2(offsets.y, offsets.y));

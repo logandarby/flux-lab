@@ -71,23 +71,3 @@ export async function initializeWebGPU(
 
   return { device, context, canvasFormat };
 }
-
-/**
- * Template literal function to inject variables into WGSL shader strings
- * @param template - The shader template string with ${variableName} placeholders
- * @param variables - Object containing variable name-value pairs
- * @returns The processed shader string with variables injected
- */
-export function injectShaderVariables(
-  template: string,
-  variables: Record<string, string | number>
-): string {
-  return template.replace(/\$\{(\w+)\}/g, (_, variableName) => {
-    if (variableName in variables) {
-      return String(variables[variableName]);
-    }
-    throw new Error(
-      `Variable '${variableName}' not found in shader template variables`
-    );
-  });
-}

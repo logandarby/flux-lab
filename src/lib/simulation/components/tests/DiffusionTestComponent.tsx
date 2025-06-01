@@ -1,18 +1,17 @@
 import { useRef } from "react";
 import BaseTestComponent from "./BaseTestComponent";
-import textureShader from "../../shaders/textureShader.wgsl?raw";
 import { TextureManager } from "@/shared/webgpu/TextureManager";
 import {
   type WebGPUResources,
   WebGPUError,
   WebGPUErrorCode,
   initializeWebGPU,
-  injectShaderVariables,
 } from "@/shared/webgpu/webgpu.utils";
 import type { SmokeTextureID } from "../../core/constants";
 import { ComputePass, type BindGroupArgs } from "@/shared/webgpu/ComputePass";
-import jacobiIterationShader from "../../shaders/jacobiIteration.wgsl?raw";
 import { RenderPass, ShaderMode } from "@/shared/webgpu/RenderPass";
+import { wgsl } from "@/lib/preprocessor";
+import { SHADERS } from "../../shaders";
 
 const GRID_SIZE = 16; // 16x16 grid
 const WORKGROUP_SIZE = 8;
@@ -63,9 +62,11 @@ class DiffusionPass extends ComputePass<SmokeTextureID> {
         entryPoint: "compute_main",
         name: "Diffusion",
         shader: device.createShaderModule({
-          code: injectShaderVariables(jacobiIterationShader, {
-            WORKGROUP_SIZE,
-            FORMAT: "rg32float",
+          code: wgsl(SHADERS.JACOBI_ITERATION, {
+            variables: {
+              WORKGROUP_SIZE,
+              FORMAT: "rg32float",
+            },
           }),
           label: `Diffusion Shader`,
         }),
@@ -220,7 +221,7 @@ class DiffusionTestSimulation {
     // Create rendering pass
     const textureShaderModule = this.resources.device.createShaderModule({
       label: "Texture Shader",
-      code: textureShader,
+      code: wgsl(SHADERS.TEXTURE),
     });
     this.renderingPass = new RenderPass<SmokeTextureID>(
       {

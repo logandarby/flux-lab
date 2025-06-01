@@ -1,5 +1,4 @@
 import { ComputePass, type BindGroupArgs } from "@/shared/webgpu/ComputePass";
-import { injectShaderVariables } from "@/shared/webgpu/webgpu.utils";
 import type { TextureManager } from "@/shared/webgpu/TextureManager";
 import {
   UniformManager,
@@ -15,15 +14,8 @@ import {
   type UniformData,
 } from "@/shared/webgpu/UniformManager";
 
-import advectionShaderTemplate from "../shaders/advectionShader.wgsl?raw";
-import jacobiIterationShaderTemplate from "../shaders/jacobiIteration.wgsl?raw";
-import divergenceShaderTemplate from "../shaders/divergenceShader.wgsl?raw";
-import gradientSubtractionShaderTemplate from "../shaders/gradientSubtractionShader.wgsl?raw";
-import boundaryConditionsShaderTemplate from "../shaders/boundaryConditionsShader.wgsl?raw";
-import addSmokeShaderTemplate from "../shaders/addSmokeShader.wgsl?raw";
-import addVelocityShaderTemplate from "../shaders/addVelocityShader.wgsl?raw";
-import dissipationShaderTemplate from "../shaders/dissipationShader.wgsl?raw";
 import type { SmokeTextureID } from "./constants";
+import { wgsl, SHADERS } from "../shaders";
 
 /**
  * Boundary condition types for fluid simulation.
@@ -357,9 +349,11 @@ export class SmokeAdvectionPasss extends UniformComputePass<
         entryPoint: "compute_main",
         shader: device.createShaderModule({
           label: "Advection Shader",
-          code: injectShaderVariables(advectionShaderTemplate, {
-            WORKGROUP_SIZE: workgroupSize,
-            OUT_FORMAT: "r32float",
+          code: wgsl(SHADERS.ADVECTION, {
+            variables: {
+              WORKGROUP_SIZE: workgroupSize,
+              OUT_FORMAT: "r32float",
+            },
           }),
         }),
       },
@@ -423,9 +417,11 @@ export class SmokeDiffusionPass extends IterativeComputePass<
         entryPoint: "compute_main",
         shader: device.createShaderModule({
           label: "Diffusion Shader",
-          code: injectShaderVariables(jacobiIterationShaderTemplate, {
-            WORKGROUP_SIZE: workgroupSize,
-            FORMAT: "r32float",
+          code: wgsl(SHADERS.JACOBI_ITERATION, {
+            variables: {
+              WORKGROUP_SIZE: workgroupSize,
+              FORMAT: "r32float",
+            },
           }),
         }),
       },
@@ -493,9 +489,11 @@ export class VelocityAdvectionPass extends UniformComputePass<
         entryPoint: "compute_main",
         shader: device.createShaderModule({
           label: "Advection Shader",
-          code: injectShaderVariables(advectionShaderTemplate, {
-            WORKGROUP_SIZE: workgroupSize,
-            OUT_FORMAT: "rg32float",
+          code: wgsl(SHADERS.ADVECTION, {
+            variables: {
+              WORKGROUP_SIZE: workgroupSize,
+              OUT_FORMAT: "rg32float",
+            },
           }),
         }),
       },
@@ -559,9 +557,11 @@ export class DiffusionPass extends IterativeComputePass<
         entryPoint: "compute_main",
         shader: device.createShaderModule({
           label: "Diffusion Shader",
-          code: injectShaderVariables(jacobiIterationShaderTemplate, {
-            WORKGROUP_SIZE: workgroupSize,
-            FORMAT: "rg32float",
+          code: wgsl(SHADERS.JACOBI_ITERATION, {
+            variables: {
+              WORKGROUP_SIZE: workgroupSize,
+              FORMAT: "rg32float",
+            },
           }),
         }),
       },
@@ -629,8 +629,10 @@ export class DivergencePass extends UniformComputePass<
         entryPoint: "compute_main",
         shader: device.createShaderModule({
           label: "Divergence Shader",
-          code: injectShaderVariables(divergenceShaderTemplate, {
-            WORKGROUP_SIZE: workgroupSize,
+          code: wgsl(SHADERS.DIVERGENCE, {
+            variables: {
+              WORKGROUP_SIZE: workgroupSize,
+            },
           }),
         }),
       },
@@ -688,9 +690,11 @@ export class PressurePass extends IterativeComputePass<
         entryPoint: "compute_main",
         shader: device.createShaderModule({
           label: "Pressure Shader",
-          code: injectShaderVariables(jacobiIterationShaderTemplate, {
-            WORKGROUP_SIZE: workgroupSize,
-            FORMAT: "r32float",
+          code: wgsl(SHADERS.JACOBI_ITERATION, {
+            variables: {
+              WORKGROUP_SIZE: workgroupSize,
+              FORMAT: "r32float",
+            },
           }),
         }),
       },
@@ -758,8 +762,10 @@ export class GradientSubtractionPass extends UniformComputePass<
         entryPoint: "compute_main",
         shader: device.createShaderModule({
           label: "Gradient Subtraction Shader",
-          code: injectShaderVariables(gradientSubtractionShaderTemplate, {
-            WORKGROUP_SIZE: workgroupSize,
+          code: wgsl(SHADERS.GRADIENT_SUBTRACTION, {
+            variables: {
+              WORKGROUP_SIZE: workgroupSize,
+            },
           }),
         }),
       },
@@ -823,21 +829,19 @@ export class BoundaryConditionsPass extends UniformComputePass<
 
   constructor(device: GPUDevice, workgroupSize: number) {
     // Create specialized shaders for different texture formats
-    const velocityShaderCode = injectShaderVariables(
-      boundaryConditionsShaderTemplate,
-      {
+    const velocityShaderCode = wgsl(SHADERS.BOUNDARY_CONDITIONS, {
+      variables: {
         WORKGROUP_SIZE: workgroupSize,
         FORMAT: "rg32float",
-      }
-    );
+      },
+    });
 
-    const scalarShaderCode = injectShaderVariables(
-      boundaryConditionsShaderTemplate,
-      {
+    const scalarShaderCode = wgsl(SHADERS.BOUNDARY_CONDITIONS, {
+      variables: {
         WORKGROUP_SIZE: workgroupSize,
         FORMAT: "r32float",
-      }
-    );
+      },
+    });
 
     const velocityShader = device.createShaderModule({
       label: "Boundary Conditions Velocity Shader",
@@ -1024,8 +1028,10 @@ export class AddSmokePass extends UniformComputePass<
         entryPoint: "compute_main",
         shader: device.createShaderModule({
           label: "Add Smoke Shader",
-          code: injectShaderVariables(addSmokeShaderTemplate, {
-            WORKGROUP_SIZE: workgroupSize,
+          code: wgsl(SHADERS.ADD_SMOKE, {
+            variables: {
+              WORKGROUP_SIZE: workgroupSize,
+            },
           }),
         }),
       },
@@ -1103,8 +1109,10 @@ export class AddVelocityPass extends UniformComputePass<
         entryPoint: "compute_main",
         shader: device.createShaderModule({
           label: "Add Velocity Shader",
-          code: injectShaderVariables(addVelocityShaderTemplate, {
-            WORKGROUP_SIZE: workgroupSize,
+          code: wgsl(SHADERS.ADD_VELOCITY, {
+            variables: {
+              WORKGROUP_SIZE: workgroupSize,
+            },
           }),
         }),
       },
@@ -1186,10 +1194,12 @@ export class SmokeDissipationPass extends UniformComputePass<
         entryPoint: "compute_main",
         shader: device.createShaderModule({
           label: "Smoke Dissipation Shader",
-          code: injectShaderVariables(dissipationShaderTemplate, {
-            WORKGROUP_SIZE: workgroupSize,
-            FORMAT: "r32float",
-            CHANNELS: 1,
+          code: wgsl(SHADERS.DISSIPATION, {
+            variables: {
+              WORKGROUP_SIZE: workgroupSize,
+              FORMAT: "r32float",
+              CHANNELS: 1,
+            },
           }),
         }),
       },
@@ -1271,10 +1281,12 @@ export class VelocityDissipationPass extends UniformComputePass<
         entryPoint: "compute_main",
         shader: device.createShaderModule({
           label: "Velocity Dissipation Shader",
-          code: injectShaderVariables(dissipationShaderTemplate, {
-            WORKGROUP_SIZE: workgroupSize,
-            FORMAT: "rg32float",
-            CHANNELS: 2,
+          code: wgsl(SHADERS.DISSIPATION, {
+            variables: {
+              WORKGROUP_SIZE: workgroupSize,
+              FORMAT: "rg32float",
+              CHANNELS: 2,
+            },
           }),
         }),
       },

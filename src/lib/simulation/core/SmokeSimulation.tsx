@@ -1,5 +1,4 @@
 import React from "react";
-import textureShader from "../shaders/textureShader.wgsl?raw";
 import {
   initializeWebGPU,
   WebGPUError,
@@ -43,6 +42,8 @@ import {
   DEFAULT_VELOCITY_CONTROLS,
   DEFAULT_SMOKE_CONTROLS,
 } from "./constants";
+import { wgsl } from "@/lib/preprocessor/core/wgsl";
+import { SHADERS } from "../shaders";
 
 function initializeTextures(
   textureManager: TextureManager<SmokeTextureID>,
@@ -264,7 +265,7 @@ class SmokeSimulation {
     // Create rendering pass
     const textureShaderModule = this.resources.device.createShaderModule({
       label: "Texture Shader",
-      code: textureShader,
+      code: wgsl(SHADERS.TEXTURE),
     });
     this.renderingPass = new RenderPass<SmokeTextureID>(
       {

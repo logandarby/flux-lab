@@ -1,18 +1,17 @@
 import { useRef, useState } from "react";
 import BaseTestComponent from "./BaseTestComponent";
-import textureShader from "../../shaders/textureShader.wgsl?raw";
 import { TextureManager } from "@/shared/webgpu/TextureManager";
 import {
   type WebGPUResources,
   WebGPUError,
   WebGPUErrorCode,
   initializeWebGPU,
-  injectShaderVariables,
 } from "@/shared/webgpu/webgpu.utils";
 import { type SmokeTextureID } from "../../core/constants";
 import { ComputePass, type BindGroupArgs } from "@/shared/webgpu/ComputePass";
-import advectionShaderTemplate from "../../shaders/advectionShader.wgsl?raw";
 import { RenderPass, ShaderMode } from "@/shared/webgpu/RenderPass";
+import { wgsl } from "@/lib/preprocessor";
+import { SHADERS } from "../../shaders";
 
 const GRID_SIZE = 16; // 8x8 grid
 const WORKGROUP_SIZE = 8;
@@ -91,9 +90,11 @@ export class AdvectionPass extends ComputePass<SmokeTextureID> {
         entryPoint: "compute_main",
         shader: device.createShaderModule({
           label: "Advection Shader",
-          code: injectShaderVariables(advectionShaderTemplate, {
-            WORKGROUP_SIZE,
-            OUT_FORMAT: "rg32float",
+          code: wgsl(SHADERS.ADVECTION, {
+            variables: {
+              WORKGROUP_SIZE,
+              OUT_FORMAT: "rg32float",
+            },
           }),
         }),
       },
@@ -241,7 +242,7 @@ class AdvectionTestSimulation {
     // Create rendering pass
     const textureShaderModule = this.resources.device.createShaderModule({
       label: "Texture Shader",
-      code: textureShader,
+      code: wgsl(SHADERS.TEXTURE),
     });
     this.renderingPass = new RenderPass<SmokeTextureID>(
       {
