@@ -1,4 +1,4 @@
-import { shaderRegistry } from "@/lib/preprocessor";
+import { shaderRegistry, wgsl as wgslRaw } from "@/lib/preprocessor";
 
 import advectionShader from "./advectionShader.wgsl?raw";
 import jacobiIteration from "./jacobiIteration.wgsl?raw";
@@ -11,6 +11,7 @@ import dissipationShader from "./dissipationShader.wgsl?raw";
 import bilinearInterpolate from "./bilinearInterpolate.wgsl?raw";
 import textureShader from "./textureShader.wgsl?raw";
 import advectParticlesShader from "./advectParticlesShader.wgsl?raw";
+import type { WGSLProprocessingOptions } from "@/lib/preprocessor/core/wgsl";
 
 /**
  * Available shader names with type safety
@@ -50,4 +51,9 @@ shaderRegistry.registerMultiple({
 /**
  * Type-safe wrapper for wgsl function with simulation shaders
  */
-export { wgsl } from "@/lib/preprocessor";
+export function wgsl(
+  shaderName: ShaderName,
+  options?: WGSLProprocessingOptions
+) {
+  return wgslRaw(shaderName, options);
+}

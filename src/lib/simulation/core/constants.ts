@@ -72,7 +72,7 @@ export interface SimulationConstants {
 
   // Physics parameters
   physics: {
-    timestep: number;
+    maxTimestep: number;
     diffusionFactor: number;
     velocityAdvection: number;
     smokeAdvection: number;
@@ -117,11 +117,11 @@ export const SIMULATION_CONSTANTS: SimulationConstants = {
   },
 
   physics: {
-    timestep: 1.0 / 60.0,
-    diffusionFactor: 1, // Smaller = slower diffusion
+    maxTimestep: 1.0 / 30.0,
+    diffusionFactor: 10, // Smaller = slower diffusion
     velocityAdvection: 10, // Smaller = slower velocity advection
     smokeAdvection: 20,
-    smokeDiffusion: 1,
+    smokeDiffusion: 5,
     smokeDissipationFactor: 0.99, // Multiplication factor for smoke density each frame
     velocityDissipationFactor: 0.995, // Similarly for velocity magnitude
   },
@@ -134,7 +134,7 @@ export const SIMULATION_CONSTANTS: SimulationConstants = {
 
   iterations: {
     diffusion: 20,
-    pressure: 40,
+    pressure: 50,
   },
 
   particles: {

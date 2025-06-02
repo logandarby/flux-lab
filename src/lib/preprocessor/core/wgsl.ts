@@ -36,7 +36,7 @@ import {
   WGSLInvalidDefineIdentifierError,
 } from "./WGSLError";
 
-interface WGSLProprocessingOptions {
+export interface WGSLProprocessingOptions {
   variables?: Record<string, string | number>;
 }
 

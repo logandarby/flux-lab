@@ -11,6 +11,7 @@ import {
   AddSmokeUniforms,
   AddVelocityUniforms,
   DissipationUniforms,
+  AdvectParticlesUniforms,
   type UniformData,
 } from "@/shared/webgpu/UniformManager";
 
@@ -1263,7 +1264,10 @@ export class SmokeDissipationPass extends UniformComputePass<
   }
 }
 
-export class AdvectParticlesPass extends ComputePass<SmokeTextureID> {
+export class AdvectParticlesPass extends UniformComputePass<
+  SmokeTextureID,
+  AdvectParticlesUniforms
+> {
   constructor(device: GPUDevice, workgroupSize: number) {
     super(
       {
@@ -1278,7 +1282,8 @@ export class AdvectParticlesPass extends ComputePass<SmokeTextureID> {
           }),
         }),
       },
-      device
+      device,
+      "Advect Particles Uniforms"
     );
   }
 
@@ -1305,12 +1310,17 @@ export class AdvectParticlesPass extends ComputePass<SmokeTextureID> {
             viewDimension: "2d",
           },
         },
+        {
+          binding: 3,
+          visibility: GPUShaderStage.COMPUTE,
+          buffer: { type: "uniform" },
+        },
       ],
     });
   }
 
   protected createBindGroup(args: BindGroupArgs<SmokeTextureID>): GPUBindGroup {
-    this.validateArgs(args, ["textureManager"]);
+    this.validateArgs(args, ["textureManager", "uniformBuffer"]);
 
     return this.device.createBindGroup({
       label: "Advect Particles Bind Group",
@@ -1333,6 +1343,10 @@ export class AdvectParticlesPass extends ComputePass<SmokeTextureID> {
           resource: args
             .textureManager!.getBackTexture("smokeParticlePosition")
             .createView(),
+        },
+        {
+          binding: 3,
+          resource: { buffer: args.uniformBuffer! },
         },
       ],
     });

@@ -526,64 +526,20 @@ export class DissipationUniforms implements SimpleUniformData {
 }
 
 /**
- * Example of complex uniform data with dynamic arrays and mixed types.
- *
- * This demonstrates how to use ComplexUniformData for advanced scenarios
- * like lighting systems with variable numbers of lights and proper alignment.
- * Most fluid simulation passes won't need this complexity.
+ * Uniform data for advecting particles.
  */
-export class LightArrayUniforms implements ComplexUniformData {
-  readonly byteLength: number;
+export class AdvectParticlesUniforms implements SimpleUniformData {
+  readonly byteLength = 1 * 4; // 1 float
+  private static readonly reusableArray = new Float32Array(1);
 
-  constructor(
-    public readonly lights: Array<{
-      position: [number, number, number];
-      color: [number, number, number];
-      intensity: number;
-    }>,
-    public readonly ambientColor: [number, number, number]
-  ) {
-    // Each light: vec3 position + vec3 color + f32 intensity = 7 floats = 28 bytes
-    // But due to alignment, each light takes 32 bytes (vec3 aligns to 16)
-    // Ambient color: vec3 = 12 bytes + 4 padding = 16 bytes
-    // Light count: u32 = 4 bytes + 12 padding = 16 bytes (to align next struct)
-    this.byteLength = 16 + 16 + lights.length * 32;
+  constructor(public readonly timestep: number) {}
+
+  toFloat32Array(): Float32Array {
+    AdvectParticlesUniforms.reusableArray[0] = this.timestep;
+    return AdvectParticlesUniforms.reusableArray;
   }
 
-  writeToBuffer(
-    device: GPUDevice,
-    buffer: GPUBuffer,
-    offset: number = 0
-  ): void {
-    const data = new ArrayBuffer(this.byteLength);
-    const writer = new UniformBufferWriter(data);
-
-    // Write light count
-    writer.writeUint32(this.lights.length);
-    writer.padTo(16); // Align to next struct
-
-    // Write ambient color
-    writer.writeVec3f(...this.ambientColor);
-    writer.padTo(16); // Align to next struct
-
-    // Write each light
-    for (const light of this.lights) {
-      writer.writeVec3f(...light.position);
-      writer.writeVec3f(...light.color);
-      writer.writeFloat32(light.intensity);
-      writer.padTo(32); // Align to next light struct
-    }
-
-    device.queue.writeBuffer(buffer, offset, data);
-  }
-
-  getHashData(): string {
-    const lightData = this.lights
-      .map(
-        (light) =>
-          `${light.position.join(",")};${light.color.join(",")};${light.intensity}`
-      )
-      .join("|");
-    return `${this.lights.length};${this.ambientColor.join(",")};${lightData}`;
+  getHashData(): Float32Array {
+    return this.toFloat32Array();
   }
 }

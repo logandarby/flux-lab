@@ -108,8 +108,8 @@ fn shadeDensity(value: f32, input: VertexOutput) -> vec4f {
     // finalColor = finalColor * brightness;
     
     // Smooth alpha transition - more transparent at low densities
-    let alpha = density * density * (3.0 - 2.0 * density); // Smoothstep
-    
+    let alpha = density;
+    // let alpha = density * density * (3.0 - 2.0 * density); // Smoothstep
     return vec4f(finalColor, alpha);
 }
 

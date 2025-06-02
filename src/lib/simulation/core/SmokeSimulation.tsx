@@ -35,6 +35,7 @@ import {
   AddSmokeUniforms,
   AddVelocityUniforms,
   DissipationUniforms,
+  AdvectParticlesUniforms,
 } from "@/shared/webgpu/UniformManager";
 import {
   type SmokeTextureID,
@@ -136,6 +137,7 @@ class SmokeSimulation {
   private renderingPass: RenderPass<SmokeTextureID> | null = null;
   private advectParticlesPass: AdvectParticlesPass | null = null;
   private isInitialized = false;
+  private lastFrameTime: number = performance.now();
 
   public async initialize(canvasRef: React.RefObject<HTMLCanvasElement>) {
     if (this.isInitialized) {
@@ -303,6 +305,17 @@ class SmokeSimulation {
     const jsStartTime = performance.now();
     this.performanceTracker.recordFrame();
 
+    // Calculate real-time timestep
+    const currentTime = performance.now();
+    const realTimeTimestep = Math.min(
+      (currentTime - this.lastFrameTime) / 1000,
+      SIMULATION_CONSTANTS.physics.maxTimestep
+    ); // Cap at maxTimestep to prevent instability during frame drops
+    this.lastFrameTime = currentTime;
+
+    // Record timestep for performance tracking
+    this.performanceTracker.recordTimestep(realTimeTimestep);
+
     // Destructure with defaults
     const {
       renderOnly = false,
@@ -350,7 +363,7 @@ class SmokeSimulation {
       // Velocity advection
       if (velocityControls.enableAdvection) {
         const advectionUniforms = new AdvectionUniforms(
-          SIMULATION_CONSTANTS.physics.timestep,
+          realTimeTimestep,
           SIMULATION_CONSTANTS.physics.velocityAdvection
         );
 
@@ -370,7 +383,7 @@ class SmokeSimulation {
       // Velocity diffusion
       if (velocityControls.enableDiffusion) {
         const diffusionUniforms = new DiffusionUniforms(
-          SIMULATION_CONSTANTS.physics.timestep,
+          realTimeTimestep,
           SIMULATION_CONSTANTS.physics.diffusionFactor
         );
 
@@ -502,7 +515,7 @@ class SmokeSimulation {
       // Smoke advection
       if (smokeControls.enableAdvection) {
         const smokeAdvectionUniforms = new AdvectionUniforms(
-          SIMULATION_CONSTANTS.physics.timestep,
+          realTimeTimestep,
           SIMULATION_CONSTANTS.physics.smokeAdvection
         );
         const smokeDensityPassEncoder = commandEncoder.beginComputePass({
@@ -541,7 +554,7 @@ class SmokeSimulation {
     // Smoke diffusion
     if (smokeControls.enableDiffusion) {
       const smokeDiffusionUniforms = new DiffusionUniforms(
-        SIMULATION_CONSTANTS.physics.timestep,
+        realTimeTimestep,
         SIMULATION_CONSTANTS.physics.smokeDiffusion
       );
       const smokeDiffusionPassEncoder = commandEncoder.beginComputePass({
@@ -578,14 +591,16 @@ class SmokeSimulation {
 
     // Advect particles
     if (smokeControls.enableAdvectParticles) {
+      const advectParticlesUniforms = new AdvectParticlesUniforms(
+        realTimeTimestep
+      );
       const advectParticlesPassEncoder = commandEncoder.beginComputePass({
         label: "Advect Particles Compute Pass",
       });
-      this.advectParticlesPass.execute(
+      this.advectParticlesPass.executeWithUniforms(
         advectParticlesPassEncoder,
-        {
-          textureManager: this.textureManager,
-        },
+        advectParticlesUniforms,
+        this.textureManager,
         SIMULATION_CONSTANTS.compute.workgroupCount
       );
       advectParticlesPassEncoder.end();
@@ -653,6 +668,9 @@ class SmokeSimulation {
         WebGPUErrorCode.NO_RESOURCES
       );
     }
+
+    // Reset frame time to prevent large timestep on first frame after reset
+    this.lastFrameTime = performance.now();
 
     // Reinitialize textures
     initializeTextures(this.textureManager, this.resources.device);

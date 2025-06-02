@@ -3,11 +3,13 @@ import { RollingAverage } from "./RollingAverage";
 export interface PerformanceMetrics {
   js: number;
   fps: number;
+  timestep: number;
 }
 
 export class PerformanceTracker {
   private jsAverage = new RollingAverage();
   private fpsAverage = new RollingAverage();
+  private timestepAverage = new RollingAverage();
 
   private timers = new Map<string, number>();
   private lastFrameTime = performance.now();
@@ -29,6 +31,10 @@ export class PerformanceTracker {
     this.jsAverage.addSample(timeMs);
   }
 
+  recordTimestep(timestepSeconds: number): void {
+    this.timestepAverage.addSample(timestepSeconds * 1000); // Convert to milliseconds for display
+  }
+
   recordFrame(): void {
     const now = performance.now();
     const deltaTime = (now - this.lastFrameTime) / 1000;
@@ -42,12 +48,14 @@ export class PerformanceTracker {
     return {
       js: this.jsAverage.get(),
       fps: this.fpsAverage.get(),
+      timestep: this.timestepAverage.get(),
     };
   }
 
   clear(): void {
     this.jsAverage.clear();
     this.fpsAverage.clear();
+    this.timestepAverage.clear();
     this.timers.clear();
   }
 }

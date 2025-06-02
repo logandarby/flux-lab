@@ -24,6 +24,10 @@ export const PerformanceViewer: React.FC<PerformanceViewerProps> = ({
           <span>fps:</span>
           <span>{metrics.fps.toFixed(0)}</span>
         </div>
+        <div className="flex justify-between text-xs font-mono">
+          <span>dt:</span>
+          <span>{metrics.timestep.toFixed(1)}ms</span>
+        </div>
       </CardContent>
     </Card>
   );
