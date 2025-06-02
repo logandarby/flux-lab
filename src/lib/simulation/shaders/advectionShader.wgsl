@@ -19,11 +19,6 @@ fn compute_main(
 ) {
     let coord = vec2<i32>(texture_coord.xy);
     let texture_size = vec2<i32>(textureDimensions(velocity));
-    // if (coord.x >= texture_size.x || coord.y >= texture_size.y) {
-    //     // TODO: Indicator for glitches
-    //     textureStore(advection_out, coord, vec4<f32>(1, 1, 0, 0));
-    //     return;
-    // }
     let current_velocity = textureLoad(velocity, coord, 0).xy;
     let prev_coord = vec2f(coord) - input.timestep * input.rdx * current_velocity;
 

@@ -10,6 +10,7 @@ import addVelocityShader from "./addVelocityShader.wgsl?raw";
 import dissipationShader from "./dissipationShader.wgsl?raw";
 import bilinearInterpolate from "./bilinearInterpolate.wgsl?raw";
 import textureShader from "./textureShader.wgsl?raw";
+import advectParticlesShader from "./advectParticlesShader.wgsl?raw";
 
 /**
  * Available shader names with type safety
@@ -26,6 +27,7 @@ export const SHADERS = {
   DISSIPATION: "dissipationShader.wgsl",
   BILINEAR_INTERPOLATE: "bilinearInterpolate.wgsl",
   TEXTURE: "textureShader.wgsl",
+  ADVECT_PARTICLES: "advectParticlesShader.wgsl",
 } as const;
 
 export type ShaderName = (typeof SHADERS)[keyof typeof SHADERS];
@@ -42,6 +44,7 @@ shaderRegistry.registerMultiple({
   [SHADERS.DISSIPATION]: dissipationShader,
   [SHADERS.BILINEAR_INTERPOLATE]: bilinearInterpolate,
   [SHADERS.TEXTURE]: textureShader,
+  [SHADERS.ADVECT_PARTICLES]: advectParticlesShader,
 });
 
 /**

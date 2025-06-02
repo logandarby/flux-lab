@@ -15,7 +15,7 @@ import {
 } from "@/shared/webgpu/UniformManager";
 
 import type { SmokeTextureID } from "./constants";
-import { wgsl, SHADERS } from "../shaders";
+import { SHADERS, wgsl } from "../shaders";
 
 /**
  * Boundary condition types for fluid simulation.
@@ -1257,6 +1257,82 @@ export class SmokeDissipationPass extends UniformComputePass<
         {
           binding: 2,
           resource: { buffer: args.uniformBuffer! },
+        },
+      ],
+    });
+  }
+}
+
+export class AdvectParticlesPass extends ComputePass<SmokeTextureID> {
+  constructor(device: GPUDevice, workgroupSize: number) {
+    super(
+      {
+        name: "Advect Particles",
+        entryPoint: "compute_main",
+        shader: device.createShaderModule({
+          label: "Advect Particles Shader",
+          code: wgsl(SHADERS.ADVECT_PARTICLES, {
+            variables: {
+              WORKGROUP_SIZE: workgroupSize,
+            },
+          }),
+        }),
+      },
+      device
+    );
+  }
+
+  protected createBindGroupLayout(): GPUBindGroupLayout {
+    return this.device.createBindGroupLayout({
+      label: "Advect Particles Bind Group Layout",
+      entries: [
+        {
+          binding: 0,
+          visibility: GPUShaderStage.COMPUTE,
+          texture: { sampleType: "unfilterable-float", viewDimension: "2d" },
+        },
+        {
+          binding: 1,
+          visibility: GPUShaderStage.COMPUTE,
+          texture: { sampleType: "unfilterable-float", viewDimension: "2d" },
+        },
+        {
+          binding: 2,
+          visibility: GPUShaderStage.COMPUTE,
+          storageTexture: {
+            format: "rg32float",
+            access: "write-only",
+            viewDimension: "2d",
+          },
+        },
+      ],
+    });
+  }
+
+  protected createBindGroup(args: BindGroupArgs<SmokeTextureID>): GPUBindGroup {
+    this.validateArgs(args, ["textureManager"]);
+
+    return this.device.createBindGroup({
+      label: "Advect Particles Bind Group",
+      layout: this.bindGroupLayout,
+      entries: [
+        {
+          binding: 0,
+          resource: args
+            .textureManager!.getCurrentTexture("velocity")
+            .createView(),
+        },
+        {
+          binding: 1,
+          resource: args
+            .textureManager!.getCurrentTexture("smokeParticlePosition")
+            .createView(),
+        },
+        {
+          binding: 2,
+          resource: args
+            .textureManager!.getBackTexture("smokeParticlePosition")
+            .createView(),
         },
       ],
     });

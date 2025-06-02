@@ -28,6 +28,12 @@ fn vertex_main(
 
 // --- FRAGMENT --- //
 
+@define PI 3.141592653589793238462
+@define VELOCITY_MODE 0
+@define PRESSURE_MODE 1
+@define DENSITY_MODE 2
+@define PARTICLES_MODE 3
+
 struct FragmentInput {
     shaderMode: u32,
     // mean and std of gaussian noise sampling
@@ -50,13 +56,10 @@ fn hsv2rgb(c: vec3f) -> vec3f
 }
 
 fn shadeVelocity(value: vec2f, input: VertexOutput) -> vec4f {
-    // Velocity
-    let pi = 3.14159;
-    // let angle = atan(value.y / value.x);
+    let DAMP = 30.0;
     let angle = acos((value.y * value.y) / (dot(value.xy, value.xy)));
-    let magnitude = sqrt(dot(value.xy, value.xy));
-    // let color = vec3f(cos(angle), cos(angle + 2 * pi / 3), cos(angle - 2 * pi / 3));
-    let color = hsv2rgb(vec3f(angle / 8 + pi / 2, 1, 1));
+    let magnitude = sqrt(dot(value.xy, value.xy)) / DAMP;
+    let color = hsv2rgb(vec3f(angle / 8 + PI / 2, 1, 1));
     return vec4f(color * magnitude, 0);
 }
 
@@ -121,7 +124,6 @@ fn rand(co: vec2f) -> f32 {
 }
 
 fn gaussrand(co: vec2f) -> vec4f {
-    @define PI 3.141592653589793238462
     let offsets = uniformInput.offsets;
     let U = rand(co + vec2(offsets.x, offsets.x));
     let V = rand(co + vec2(offsets.y, offsets.y));
@@ -138,6 +140,29 @@ fn addNoise(color: vec4f, texCoord: vec2f) -> vec4f {
     return color + noise * magnitude + baseNoise;
 }
 
+// TODO: This is currently inefficient. We should be using instanced particle rendering/compute particle rendering probably.
+fn shadeParticles(particlePosition: vec2f, input: VertexOutput) -> vec4f {
+    // Since texcoord is in [0, 1] we need to multiply by grid size to get the actual position512.0, 512.0);
+    let gridSize = vec2f(512.0, 512.0);
+    let currentPos = input.texCoord * gridSize;
+    
+    // Calculate distance from current pixel to particle position
+    let distance = length(currentPos - particlePosition);
+    let particleRadius = 2.0; // Particle size in pixels
+    
+    // Render particle as a circle with smooth falloff
+    if (distance <= particleRadius) {
+        let falloff = 1.0 - (distance / particleRadius);
+        let intensity = falloff * falloff; // Smooth falloff
+        
+        // Particle color (could be based on velocity, density, etc.)
+        let particleColor = vec3f(1.0, 0.8, 0.4); // Warm orange
+        return vec4f(particleColor * intensity, intensity);
+    }
+
+    return vec4f(0.0, 0.0, 0.0, 0.0);
+}
+
 @fragment
 fn fragment_main(input: VertexOutput) -> @location(0)vec4f {
     let value = textureSample(texture, textureSampler, input.texCoord);
@@ -145,14 +170,17 @@ fn fragment_main(input: VertexOutput) -> @location(0)vec4f {
     var output: vec4f;
 
     switch uniformInput.shaderMode {
-        case 0: {
+        case VELOCITY_MODE: {
             output = shadeVelocity(value.xy, input);
         }
-        case 1: {
+        case PRESSURE_MODE: {
             output = shadePressure(value.x, input);
         }
-        case 2: {
+        case DENSITY_MODE: {
             output = shadeDensity(value.x, input);
+        }
+        case PARTICLES_MODE: {
+            output = shadeParticles(value.xy, input);
         }
         default: {
             output = vec4(1, 1, 1, 1);

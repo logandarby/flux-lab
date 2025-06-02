@@ -33,6 +33,7 @@ export enum ShaderMode {
   VELOCITY = 0,
   PRESSURE = 1,
   DENSITY = 2,
+  PARTICLES = 3,
 }
 
 export class RenderPass<TextureID extends string | number> {

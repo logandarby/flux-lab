@@ -24,6 +24,7 @@ export interface SmokeSimulationControls {
   enableBoundaryConditions?: boolean;
   enableDiffusion?: boolean;
   enableDissipation?: boolean;
+  enableAdvectParticles?: boolean;
 }
 
 // Overall step configuration
@@ -52,6 +53,7 @@ export const DEFAULT_SMOKE_CONTROLS: Required<SmokeSimulationControls> = {
   enableBoundaryConditions: true,
   enableDiffusion: true,
   enableDissipation: true,
+  enableAdvectParticles: true,
 };
 
 // Simulation constants interface

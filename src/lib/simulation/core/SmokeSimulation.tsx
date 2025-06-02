@@ -23,6 +23,7 @@ import {
   SmokeDissipationPass,
   VelocityDissipationPass,
   BindLayoutManager,
+  AdvectParticlesPass,
 } from "./SimulationPasses";
 import {
   AdvectionUniforms,
@@ -133,6 +134,7 @@ class SmokeSimulation {
   private addSmokePass: AddSmokePass | null = null;
   private addVelocityPass: AddVelocityPass | null = null;
   private renderingPass: RenderPass<SmokeTextureID> | null = null;
+  private advectParticlesPass: AdvectParticlesPass | null = null;
   private isInitialized = false;
 
   public async initialize(canvasRef: React.RefObject<HTMLCanvasElement>) {
@@ -251,6 +253,10 @@ class SmokeSimulation {
       this.resources.device,
       SIMULATION_CONSTANTS.compute.workgroupSize
     );
+    this.advectParticlesPass = new AdvectParticlesPass(
+      this.resources.device,
+      SIMULATION_CONSTANTS.compute.workgroupSize
+    );
 
     // Initialize user interaction passes
     this.addSmokePass = new AddSmokePass(
@@ -329,6 +335,7 @@ class SmokeSimulation {
       !this.addSmokePass ||
       !this.addVelocityPass ||
       !this.renderingPass ||
+      !this.advectParticlesPass ||
       !this.isInitialized
     ) {
       throw new WebGPUError(
@@ -569,6 +576,21 @@ class SmokeSimulation {
       this.textureManager.swap("smokeDensity");
     }
 
+    // Advect particles
+    if (smokeControls.enableAdvectParticles) {
+      const advectParticlesPassEncoder = commandEncoder.beginComputePass({
+        label: "Advect Particles Compute Pass",
+      });
+      this.advectParticlesPass.execute(
+        advectParticlesPassEncoder,
+        {
+          textureManager: this.textureManager,
+        },
+        SIMULATION_CONSTANTS.compute.workgroupCount
+      );
+      advectParticlesPassEncoder.end();
+      this.textureManager.swap("smokeParticlePosition");
+    }
     // Render Pass
     // Ensure canvas context is properly configured with current device
     this.resources.context.configure({
