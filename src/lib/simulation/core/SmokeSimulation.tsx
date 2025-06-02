@@ -4,6 +4,7 @@ import {
   WebGPUError,
   WebGPUErrorCode,
   type WebGPUResources,
+  GPUTimer,
 } from "@/shared/webgpu/webgpu.utils";
 import { TextureManager } from "@/shared/webgpu/TextureManager";
 import { RenderPass, ShaderMode } from "@/shared/webgpu/RenderPass";
@@ -122,6 +123,7 @@ class SmokeSimulation {
   private resources: WebGPUResources | null = null;
   private textureManager: TextureManager<SmokeTextureID> | null = null;
   private performanceTracker = new PerformanceTracker();
+  private gpuTimer: GPUTimer | null = null;
   private advectionPass: VelocityAdvectionPass | null = null;
   private smokeAdvectionPass: SmokeAdvectionPasss | null = null;
   private smokeDiffusionPass: SmokeDiffusionPass | null = null;
@@ -151,6 +153,13 @@ class SmokeSimulation {
       );
     }
     this.resources = await initializeWebGPU(canvasRef.current);
+
+    // Initialize GPU timer and performance tracking
+    this.gpuTimer = new GPUTimer(
+      this.resources.device,
+      this.resources.canTimestamp
+    );
+    this.performanceTracker.setGpuSupported(this.resources.canTimestamp);
 
     // Initialize texture manager
     this.textureManager = new TextureManager<SmokeTextureID>(
@@ -623,6 +632,9 @@ class SmokeSimulation {
           clearValue: { r: 0, g: 0, b: 0, a: 0 },
         },
       ],
+      ...(this.gpuTimer?.getTimestampWrites() && {
+        timestampWrites: this.gpuTimer.getTimestampWrites(),
+      }),
     });
     this.renderingPass.writeToUniformBuffer({
       shaderMode,
@@ -647,7 +659,20 @@ class SmokeSimulation {
     );
 
     renderPassEncoder.end();
+
+    // Resolve GPU timing
+    if (this.gpuTimer) {
+      this.gpuTimer.resolveTimestamps(commandEncoder);
+    }
+
     this.resources.device.queue.submit([commandEncoder.finish()]);
+
+    // Read GPU timing results asynchronously
+    if (this.gpuTimer) {
+      this.gpuTimer.readResults().then(() => {
+        this.performanceTracker.recordGPU(this.gpuTimer!.getLastGpuTime());
+      });
+    }
 
     // Record JS performance time
     const jsElapsed = performance.now() - jsStartTime;
@@ -763,6 +788,7 @@ class SmokeSimulation {
     // Clean up heavy resources
     this.textureManager?.destroy(); // Multiple large textures
     this.renderingPass?.destroy(); // Uniform buffers
+    this.gpuTimer?.destroy(); // GPU timing resources
     this.advectionPass?.destroy();
     this.smokeAdvectionPass?.destroy();
     this.smokeDiffusionPass?.destroy();

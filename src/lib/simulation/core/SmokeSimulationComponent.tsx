@@ -24,6 +24,8 @@ function SmokeSimulationComponent() {
       js: 0,
       fps: 0,
       timestep: 0,
+      gpu: 0,
+      gpuSupported: false,
     });
   const isPerformanceVisible = usePerformanceToggle();
   const [selectedMode, setSelectedMode] = usePersistedState<ShaderMode>(

@@ -122,13 +122,13 @@ export const SIMULATION_CONSTANTS: SimulationConstants = {
     velocityAdvection: 10, // Smaller = slower velocity advection
     smokeAdvection: 20,
     smokeDiffusion: 5,
-    smokeDissipationFactor: 0.99, // Multiplication factor for smoke density each frame
+    smokeDissipationFactor: 0.995, // Multiplication factor for smoke density each frame
     velocityDissipationFactor: 0.995, // Similarly for velocity magnitude
   },
 
   interaction: {
     radius: 20, // Radius of effect when adding smoke/velocity
-    smokeIntensity: 0.4, // Intensity of smoke when clicking
+    smokeIntensity: 0.2, // Intensity of smoke when clicking
     velocityIntensity: 2.0, // Intensity multiplier for velocity when dragging
   },
 

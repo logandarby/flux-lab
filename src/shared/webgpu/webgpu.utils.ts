@@ -11,7 +11,10 @@ export interface WebGPUResources {
   device: GPUDevice;
   context: GPUCanvasContext;
   canvasFormat: GPUTextureFormat;
+  canTimestamp: boolean;
 }
+
+export { GPUTimer } from "./GPUTimer";
 
 /**
  * WebGPU utility functions for initialization and setup
@@ -29,7 +32,7 @@ export class WebGPUError extends Error {
 /**
  * Initialize WebGPU
  * @param canvas - The canvas element to initialize WebGPU on
- * @returns {Promise<{ device: GPUDevice; context: GPUCanvasContext; canvasFormat: GPUTextureFormat }>}
+ * @returns {Promise<{ device: GPUDevice; context: GPUCanvasContext; canvasFormat: GPUTextureFormat; canTimestamp: boolean }>}
  */
 export async function initializeWebGPU(
   canvas: HTMLCanvasElement
@@ -48,8 +51,19 @@ export async function initializeWebGPU(
     throw new WebGPUError("No GPU Adapter found", WebGPUErrorCode.NO_ADAPTER);
   }
 
-  // Request device
-  const device = await adapter.requestDevice();
+  // Check for timestamp query support
+  const canTimestamp = adapter.features.has("timestamp-query");
+
+  if (!canTimestamp) {
+    throw new WebGPUError("Timestamp query is not supported on this GPU");
+  }
+
+  // Request device with optional timestamp-query feature
+  const device = await adapter.requestDevice({
+    requiredFeatures: [
+      ...(canTimestamp ? ["timestamp-query" as GPUFeatureName] : []),
+    ],
+  });
   if (!device) {
     throw new WebGPUError("No GPU Device Found", WebGPUErrorCode.NO_DEVICE);
   }
@@ -69,5 +83,5 @@ export async function initializeWebGPU(
     format: canvasFormat,
   });
 
-  return { device, context, canvasFormat };
+  return { device, context, canvasFormat, canTimestamp };
 }
