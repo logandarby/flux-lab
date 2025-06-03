@@ -1,6 +1,7 @@
 import { useCallback, useEffect } from "react";
 import { Button } from "@/shared/ui/button";
 import { cn } from "@/shared/utils/utils";
+import React from "react";
 
 interface SimulationControlsProps {
   isInitialized: boolean;
@@ -12,7 +13,7 @@ interface SimulationControlsProps {
   customControls?: React.ReactNode;
 }
 
-function SimulationControls({
+const SimulationControls = React.memo(function SimulationControls({
   isInitialized,
   isPlaying,
   setIsPlaying,
@@ -75,14 +76,12 @@ function SimulationControls({
       return;
     }
 
-    setIsPlaying(false);
-
     try {
       await onRestart();
     } catch (error) {
       console.error(`Failed to restart ${title}:`, error);
     }
-  }, [isInitialized, onRestart, title, setIsPlaying]);
+  }, [isInitialized, onRestart, title]);
 
   // Keyboard controls
   useEffect(() => {
@@ -225,6 +224,6 @@ function SimulationControls({
       </div>
     </div>
   );
-}
+});
 
 export default SimulationControls;

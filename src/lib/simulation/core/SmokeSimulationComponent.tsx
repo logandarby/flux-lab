@@ -1,4 +1,4 @@
-import React, { useCallback, useRef } from "react";
+import { useCallback, useRef } from "react";
 import { useEffect, useState } from "react";
 import { ShaderMode } from "@/shared/webgpu/RenderPass";
 import SmokeSimulation from "./SmokeSimulation";
@@ -7,11 +7,40 @@ import { usePersistedState } from "@/shared/utils/localStorage.utils";
 import { PerformanceViewer } from "@/lib/performance";
 import type { PerformanceMetrics } from "@/lib/performance";
 import { usePerformanceToggle } from "@/lib/performance";
+import { FunctionCallTracker, RAFEventProcessor } from "@/lib/performance";
+import type { EventPerformanceMetrics } from "@/lib/performance";
 import { SIMULATION_CONSTANTS } from "./constants";
 import { type SmokeTextureID } from "./types";
+import type { MouseEventData } from "@/lib/performance/types/eventMetrics";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/shared/ui/select";
 
 const CANVAS_HEIGHT = 512;
 const CANVAS_WIDTH = CANVAS_HEIGHT;
+
+// Visualization mode options
+const VISUALIZATION_MODES = [
+  {
+    value: ShaderMode.DENSITY,
+    label: "Smoke Density",
+    texture: "smokeDensity" as SmokeTextureID,
+  },
+  {
+    value: ShaderMode.VELOCITY,
+    label: "Velocity Field",
+    texture: "velocity" as SmokeTextureID,
+  },
+  {
+    value: ShaderMode.PRESSURE,
+    label: "Pressure Field",
+    texture: "pressure" as SmokeTextureID,
+  },
+];
 
 function SmokeSimulationComponent() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -20,14 +49,18 @@ function SmokeSimulationComponent() {
   const [isInitialized, setIsInitialized] = useState(false);
   const [isPlaying, setIsPlaying] = useState(true);
   const [initError, setInitError] = useState<string | null>(null);
+
+  // Use refs for performance metrics to avoid React re-renders during animation
+  const performanceMetricsRef = useRef<PerformanceMetrics>({
+    js: 0,
+    fps: 0,
+    timestep: 0,
+    gpu: 0,
+    gpuSupported: false,
+  });
   const [performanceMetrics, setPerformanceMetrics] =
-    useState<PerformanceMetrics>({
-      js: 0,
-      fps: 0,
-      timestep: 0,
-      gpu: 0,
-      gpuSupported: false,
-    });
+    useState<PerformanceMetrics>(performanceMetricsRef.current);
+
   const isPerformanceVisible = usePerformanceToggle();
   const [selectedMode, setSelectedMode] = usePersistedState<ShaderMode>(
     "smoke-simulation-shader-mode",
@@ -39,10 +72,205 @@ function SmokeSimulationComponent() {
       "smokeDensity"
     );
 
-  // Mouse interaction state
-  const [isMouseDown, setIsMouseDown] = useState(false);
+  // Mouse interaction state - use refs to avoid triggering re-renders
+  const isMouseDownRef = useRef(false);
   const previousMousePos = useRef<{ x: number; y: number } | null>(null);
   const lastInteractionTime = useRef<number>(0);
+
+  // Cache canvas bounds to avoid frequent getBoundingClientRect calls
+  const canvasBoundsRef = useRef<DOMRect | null>(null);
+  const canvasBoundsUpdateTimeRef = useRef<number>(0);
+
+  // Performance tracking
+  const mouseMoveTracker = useRef(new FunctionCallTracker("Mouse Move Events"));
+  const eventPerformanceMetricsRef = useRef<EventPerformanceMetrics>({
+    mouseMoveCallsPerSecond: 0,
+  });
+  const [eventPerformanceMetrics, setEventPerformanceMetrics] =
+    useState<EventPerformanceMetrics>(eventPerformanceMetricsRef.current);
+
+  // RAF Event Processor for batching mouse events
+  const rafEventProcessor = useRef<RAFEventProcessor<MouseEventData> | null>(
+    null
+  );
+
+  // Helper function to get cached canvas bounds
+  const getCachedCanvasBounds = useCallback(() => {
+    const now = performance.now();
+    if (
+      !canvasBoundsRef.current ||
+      now - canvasBoundsUpdateTimeRef.current > 100
+    ) {
+      if (canvasRef.current) {
+        canvasBoundsRef.current = canvasRef.current.getBoundingClientRect();
+        canvasBoundsUpdateTimeRef.current = now;
+      }
+    }
+    return canvasBoundsRef.current;
+  }, []);
+
+  // Helper function to convert canvas coordinates to grid coordinates
+  const canvasToGridCoords = useCallback(
+    (clientX: number, clientY: number) => {
+      const rect = getCachedCanvasBounds();
+      if (!rect) return null;
+
+      const canvasX = clientX - rect.left;
+      const canvasY = clientY - rect.top;
+
+      // Scale to grid coordinates
+      const gridX =
+        (canvasX / rect.width) * SIMULATION_CONSTANTS.grid.size.width;
+      // Note: Y coordinate should NOT be flipped since both canvas and WebGPU use top-left origin
+      const gridY =
+        (canvasY / rect.height) * SIMULATION_CONSTANTS.grid.size.height;
+
+      return { x: gridX, y: gridY };
+    },
+    [getCachedCanvasBounds]
+  );
+
+  // Batched mouse event handler
+  const handleBatchedMouseEvents = useCallback(
+    (events: MouseEventData[]) => {
+      // Track raw events for performance monitoring
+      mouseMoveTracker.current.recordCall();
+
+      if (!isInitialized || !smokeSimulation.current || events.length === 0)
+        return;
+
+      // Process the batch of events
+      for (const event of events) {
+        const coords = canvasToGridCoords(event.clientX, event.clientY);
+        if (!coords) continue;
+
+        if (event.type === "mousedown") {
+          isMouseDownRef.current = true;
+          smokeSimulation.current.addSmoke(coords.x, coords.y);
+          previousMousePos.current = coords;
+          lastInteractionTime.current = event.timestamp;
+        } else if (event.type === "mousemove" && isMouseDownRef.current) {
+          smokeSimulation.current.addSmoke(coords.x, coords.y);
+
+          if (previousMousePos.current) {
+            const deltaTime =
+              (event.timestamp - lastInteractionTime.current) / 1000;
+
+            if (deltaTime > 0) {
+              const rawVelocityX =
+                (coords.x - previousMousePos.current.x) / deltaTime;
+              const rawVelocityY =
+                (coords.y - previousMousePos.current.y) / deltaTime;
+
+              const velocityScale = 0.02;
+              const maxVelocity = 10;
+
+              let velocityX = rawVelocityX * velocityScale;
+              let velocityY = rawVelocityY * velocityScale;
+
+              const velocityMagnitude = Math.sqrt(
+                velocityX * velocityX + velocityY * velocityY
+              );
+              if (velocityMagnitude > maxVelocity) {
+                const scale = maxVelocity / velocityMagnitude;
+                velocityX *= scale;
+                velocityY *= scale;
+              }
+
+              smokeSimulation.current.addVelocity(
+                coords.x,
+                coords.y,
+                velocityX,
+                velocityY
+              );
+            }
+
+            previousMousePos.current = coords;
+            lastInteractionTime.current = event.timestamp;
+          }
+        } else if (event.type === "mouseup") {
+          isMouseDownRef.current = false;
+          previousMousePos.current = null;
+        }
+      }
+    },
+    [isInitialized, canvasToGridCoords]
+  );
+
+  // Initialize RAF event processor and native event listeners to bypass React overhead
+  useEffect(() => {
+    rafEventProcessor.current = new RAFEventProcessor(handleBatchedMouseEvents);
+
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+
+    // Native event handlers (bypass React's synthetic event system)
+    const handleNativeMouseDown = (event: MouseEvent) => {
+      rafEventProcessor.current?.addEvent({
+        clientX: event.clientX,
+        clientY: event.clientY,
+        type: "mousedown",
+        timestamp: performance.now(),
+      });
+    };
+
+    const handleNativeMouseMove = (event: MouseEvent) => {
+      rafEventProcessor.current?.addEvent({
+        clientX: event.clientX,
+        clientY: event.clientY,
+        type: "mousemove",
+        timestamp: performance.now(),
+      });
+    };
+
+    const handleNativeMouseUp = (event: MouseEvent) => {
+      rafEventProcessor.current?.addEvent({
+        clientX: event.clientX,
+        clientY: event.clientY,
+        type: "mouseup",
+        timestamp: performance.now(),
+      });
+    };
+
+    const handleNativeMouseLeave = () => {
+      isMouseDownRef.current = false;
+      previousMousePos.current = null;
+    };
+
+    // Add native event listeners with passive option for better performance
+    canvas.addEventListener("mousedown", handleNativeMouseDown);
+    canvas.addEventListener("mousemove", handleNativeMouseMove, {
+      passive: true,
+    });
+    canvas.addEventListener("mouseup", handleNativeMouseUp);
+    canvas.addEventListener("mouseleave", handleNativeMouseLeave);
+
+    // Cleanup
+    return () => {
+      rafEventProcessor.current?.destroy();
+
+      if (canvas) {
+        canvas.removeEventListener("mousedown", handleNativeMouseDown);
+        canvas.removeEventListener("mousemove", handleNativeMouseMove);
+        canvas.removeEventListener("mouseup", handleNativeMouseUp);
+        canvas.removeEventListener("mouseleave", handleNativeMouseLeave);
+      }
+    };
+  }, [handleBatchedMouseEvents]);
+
+  // Update performance stats periodically
+  useEffect(() => {
+    const interval = setInterval(() => {
+      if (smokeSimulation.current) {
+        setPerformanceMetrics(smokeSimulation.current.getPerformanceMetrics());
+      }
+      setEventPerformanceMetrics({
+        mouseMoveCallsPerSecond: mouseMoveTracker.current.getCallsPerSecond(),
+      });
+    }, 100); // Update every 100ms
+
+    return () => clearInterval(interval);
+  }, []);
 
   // Cleanup effect - destroy simulation when component unmounts
   useEffect(() => {
@@ -56,9 +284,9 @@ function SmokeSimulationComponent() {
     };
   }, []);
 
+  // Initialize simulation
   useEffect(() => {
     const runSimulation = async () => {
-      // Prevent double initialization
       if (!canvasRef.current || smokeSimulation.current) {
         return;
       }
@@ -69,14 +297,12 @@ function SmokeSimulationComponent() {
 
       try {
         await simulation.initialize(canvasRef);
-        // Only update state if this simulation instance is still current
         if (smokeSimulation.current === simulation) {
           setIsInitialized(true);
           setInitError(null);
         }
       } catch (error) {
         console.error("Failed to initialize smoke simulation:", error);
-        // Only clean up if this simulation instance is still current
         if (smokeSimulation.current === simulation) {
           simulation.destroy();
           smokeSimulation.current = null;
@@ -88,7 +314,7 @@ function SmokeSimulationComponent() {
       }
     };
     runSimulation();
-  }, []); // Remove isInitialized dependency to prevent re-initialization
+  }, []);
 
   // Animation loop
   useEffect(() => {
@@ -103,11 +329,6 @@ function SmokeSimulationComponent() {
             shaderMode: selectedMode,
             texture: selectedTexture,
           });
-
-          // Update performance metrics
-          setPerformanceMetrics(
-            smokeSimulation.current.getPerformanceMetrics()
-          );
 
           animationFrameRef.current = requestAnimationFrame(animate);
         } catch (error) {
@@ -167,131 +388,15 @@ function SmokeSimulationComponent() {
     }
   }, [isInitialized, selectedMode, selectedTexture]);
 
-  // Helper function to convert canvas coordinates to grid coordinates
-  const canvasToGridCoords = useCallback((clientX: number, clientY: number) => {
-    if (!canvasRef.current) return null;
-
-    const rect = canvasRef.current.getBoundingClientRect();
-    const canvasX = clientX - rect.left;
-    const canvasY = clientY - rect.top;
-
-    // Scale to grid coordinates
-    const gridX = (canvasX / rect.width) * SIMULATION_CONSTANTS.grid.size.width;
-    // Note: Y coordinate should NOT be flipped since both canvas and WebGPU use top-left origin
-    const gridY =
-      (canvasY / rect.height) * SIMULATION_CONSTANTS.grid.size.height;
-
-    return { x: gridX, y: gridY };
-  }, []);
-
-  // Mouse event handlers
-  const handleMouseDown = useCallback(
-    (event: React.MouseEvent<HTMLCanvasElement>) => {
-      if (!isInitialized || !smokeSimulation.current) return;
-
-      setIsMouseDown(true);
-      const coords = canvasToGridCoords(event.clientX, event.clientY);
-      if (coords) {
-        // Add smoke on click
-        smokeSimulation.current.addSmoke(coords.x, coords.y);
-        previousMousePos.current = coords;
-        lastInteractionTime.current = performance.now();
-      }
-    },
-    [isInitialized, canvasToGridCoords]
-  );
-
-  const handleMouseMove = useCallback(
-    (event: React.MouseEvent<HTMLCanvasElement>) => {
-      if (!isInitialized || !smokeSimulation.current || !isMouseDown) return;
-
-      const coords = canvasToGridCoords(event.clientX, event.clientY);
-      if (coords && previousMousePos.current) {
-        const currentTime = performance.now();
-        const deltaTime = (currentTime - lastInteractionTime.current) / 1000; // Convert to seconds
-
-        // Add smoke continuously while dragging
-        smokeSimulation.current.addSmoke(coords.x, coords.y);
-
-        if (deltaTime > 0) {
-          // Calculate velocity based on mouse movement with scaling
-          const rawVelocityX =
-            (coords.x - previousMousePos.current.x) / deltaTime;
-          const rawVelocityY =
-            (coords.y - previousMousePos.current.y) / deltaTime;
-
-          // Scale down and clamp velocity to reasonable range (1-10)
-          const velocityScale = 0.02; // Scale factor to reduce velocity
-          const maxVelocity = 10;
-
-          let velocityX = rawVelocityX * velocityScale;
-          let velocityY = rawVelocityY * velocityScale;
-
-          // Clamp velocity magnitude
-          const velocityMagnitude = Math.sqrt(
-            velocityX * velocityX + velocityY * velocityY
-          );
-          if (velocityMagnitude > maxVelocity) {
-            const scale = maxVelocity / velocityMagnitude;
-            velocityX *= scale;
-            velocityY *= scale;
-          }
-
-          // Add velocity to the simulation
-          smokeSimulation.current.addVelocity(
-            coords.x,
-            coords.y,
-            velocityX,
-            velocityY
-          );
-
-          previousMousePos.current = coords;
-          lastInteractionTime.current = currentTime;
-        }
-      }
-    },
-    [isInitialized, isMouseDown, canvasToGridCoords]
-  );
-
-  const handleMouseUp = useCallback(() => {
-    setIsMouseDown(false);
-    previousMousePos.current = null;
-  }, []);
-
-  const handleMouseLeave = useCallback(() => {
-    setIsMouseDown(false);
-    previousMousePos.current = null;
-  }, []);
-
-  // Visualization mode options
-  const visualizationModes = [
-    {
-      value: ShaderMode.DENSITY,
-      label: "Smoke Density",
-      texture: "smokeDensity" as SmokeTextureID,
-    },
-    {
-      value: ShaderMode.VELOCITY,
-      label: "Velocity Field",
-      texture: "velocity" as SmokeTextureID,
-    },
-    {
-      value: ShaderMode.PRESSURE,
-      label: "Pressure Field",
-      texture: "pressure" as SmokeTextureID,
-    },
-  ];
-
   const handleModeChange = useCallback(
-    (event: React.ChangeEvent<HTMLSelectElement>) => {
-      const mode = parseInt(event.target.value) as ShaderMode;
-      const modeOption = visualizationModes.find((m) => m.value === mode);
+    (value: string) => {
+      const mode = parseInt(value) as ShaderMode;
+      const modeOption = VISUALIZATION_MODES.find((m) => m.value === mode);
       if (modeOption) {
         setSelectedMode(mode);
         setSelectedTexture(modeOption.texture);
       }
     },
-    // eslint-disable-next-line react-hooks/exhaustive-deps
     [setSelectedMode, setSelectedTexture]
   );
 
@@ -301,18 +406,22 @@ function SmokeSimulationComponent() {
       <label className="block text-sm font-medium text-gray-700 mb-2">
         Visualization Mode
       </label>
-      <select
-        value={selectedMode}
-        onChange={handleModeChange}
+      <Select
+        value={selectedMode.toString()}
+        onValueChange={handleModeChange}
         disabled={!isInitialized}
-        className="w-full px-3 py-2 text-sm border border-gray-300 rounded-md bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent disabled:bg-gray-100 disabled:cursor-not-allowed"
       >
-        {visualizationModes.map((mode) => (
-          <option key={mode.value} value={mode.value}>
-            {mode.label}
-          </option>
-        ))}
-      </select>
+        <SelectTrigger className="w-full">
+          <SelectValue placeholder="Select visualization mode" />
+        </SelectTrigger>
+        <SelectContent>
+          {VISUALIZATION_MODES.map((mode) => (
+            <SelectItem key={mode.value} value={mode.value.toString()}>
+              {mode.label}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
     </div>
   );
 
@@ -320,8 +429,10 @@ function SmokeSimulationComponent() {
     <div>
       <PerformanceViewer
         metrics={performanceMetrics}
+        eventMetrics={eventPerformanceMetrics}
         isVisible={isPerformanceVisible}
       />
+
       <div className="max-w-6xl mx-auto flex flex-col items-center gap-6">
         {/* Title and Description */}
         <div className="text-center">
@@ -349,10 +460,6 @@ function SmokeSimulationComponent() {
               height={CANVAS_HEIGHT}
               ref={canvasRef}
               className="border border-gray-300 rounded-lg shadow-lg cursor-crosshair"
-              onMouseDown={handleMouseDown}
-              onMouseMove={handleMouseMove}
-              onMouseUp={handleMouseUp}
-              onMouseLeave={handleMouseLeave}
             />
           </div>
 
