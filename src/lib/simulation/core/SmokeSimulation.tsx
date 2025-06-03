@@ -448,19 +448,24 @@ class SmokeSimulation {
     smokeControls: typeof DEFAULT_SMOKE_CONTROLS,
     realTimeTimestep: number
   ) {
-    // Combined pass for operations that can be batched together
-    const combinedPassEncoder = commandEncoder.beginComputePass({
-      label: "Combined Fluid Simulation Pass",
+    /**
+     * NOTE: It's safe to do all compute operations in one pass,
+     * because WebGPU limits all `dispatchWorkgroup` calls to their own usage scope. This means we avoid the possibility of any
+     * RAW, WAR, or WAW hazards.
+     * More information at https://www.w3.org/TR/webgpu/#programming-model-synchronization
+     */
+
+    const computePassEncoder = commandEncoder.beginComputePass({
+      label: "Compute Pass",
     });
 
-    // Execute velocity operations that can be batched
     if (velocityControls.enableAdvection) {
       const advectionUniforms = new AdvectionUniforms(
         realTimeTimestep,
         SIMULATION_CONSTANTS.physics.velocityAdvection
       );
       this.advectionPass!.executeWithUniforms(
-        combinedPassEncoder,
+        computePassEncoder,
         advectionUniforms,
         this.textureManager!,
         SIMULATION_CONSTANTS.compute.workgroupCount
@@ -474,7 +479,7 @@ class SmokeSimulation {
         SIMULATION_CONSTANTS.physics.diffusionFactor
       );
       this.diffusionPass!.executeIterations(
-        combinedPassEncoder,
+        computePassEncoder,
         diffusionUniforms,
         this.textureManager!,
         SIMULATION_CONSTANTS.compute.workgroupCount,
@@ -487,46 +492,32 @@ class SmokeSimulation {
         SIMULATION_CONSTANTS.grid.scale
       );
       this.divergencePass!.executeWithUniforms(
-        combinedPassEncoder,
+        computePassEncoder,
         divergenceUniforms,
         this.textureManager!,
         SIMULATION_CONSTANTS.compute.workgroupCount
       );
     }
 
-    combinedPassEncoder.end();
-
-    // Pressure solving needs its own pass due to the iteration dependencies
     if (velocityControls.enablePressureProjection) {
-      const pressurePassEncoder = commandEncoder.beginComputePass({
-        label: "Pressure Solver Pass",
-      });
-
       const pressureUniforms = new PressureUniforms(
         SIMULATION_CONSTANTS.grid.scale
       );
       this.pressurePass!.executeIterations(
-        pressurePassEncoder,
+        computePassEncoder,
         pressureUniforms,
         this.textureManager!,
         SIMULATION_CONSTANTS.compute.workgroupCount,
         SIMULATION_CONSTANTS.iterations.pressure
       );
-
-      pressurePassEncoder.end();
     }
-
-    // Post-pressure operations
-    const postPressurePassEncoder = commandEncoder.beginComputePass({
-      label: "Post-pressure Operations Pass",
-    });
 
     if (velocityControls.enablePressureBoundaryConditions) {
       const pressureBoundaryUniforms = new BoundaryUniforms(
         BoundaryType.SCALAR_NEUMANN
       );
       this.boundaryConditionsPass!.executeForTexture(
-        postPressurePassEncoder,
+        computePassEncoder,
         "pressure",
         pressureBoundaryUniforms,
         this.textureManager!,
@@ -540,7 +531,7 @@ class SmokeSimulation {
         SIMULATION_CONSTANTS.grid.scale
       );
       this.gradientSubtractionPass!.executeWithUniforms(
-        postPressurePassEncoder,
+        computePassEncoder,
         gradientUniforms,
         this.textureManager!,
         SIMULATION_CONSTANTS.compute.workgroupCount
@@ -553,7 +544,7 @@ class SmokeSimulation {
         BoundaryType.NO_SLIP_VELOCITY
       );
       this.boundaryConditionsPass!.executeForTexture(
-        postPressurePassEncoder,
+        computePassEncoder,
         "velocity",
         velocityBoundaryUniforms,
         this.textureManager!,
@@ -567,7 +558,7 @@ class SmokeSimulation {
         SIMULATION_CONSTANTS.physics.velocityDissipationFactor
       );
       this.velocityDissipationPass!.executeWithUniforms(
-        postPressurePassEncoder,
+        computePassEncoder,
         velocityDissipationUniforms,
         this.textureManager!,
         SIMULATION_CONSTANTS.compute.workgroupCount
@@ -575,20 +566,13 @@ class SmokeSimulation {
       this.textureManager!.swap("velocity");
     }
 
-    postPressurePassEncoder.end();
-
-    // Smoke operations are batched together
-    const smokePassEncoder = commandEncoder.beginComputePass({
-      label: "Smoke Operations Pass",
-    });
-
     if (smokeControls.enableAdvection) {
       const smokeAdvectionUniforms = new AdvectionUniforms(
         realTimeTimestep,
         SIMULATION_CONSTANTS.physics.smokeAdvection
       );
       this.smokeAdvectionPass!.executeWithUniforms(
-        smokePassEncoder,
+        computePassEncoder,
         smokeAdvectionUniforms,
         this.textureManager!,
         SIMULATION_CONSTANTS.compute.workgroupCount
@@ -601,7 +585,7 @@ class SmokeSimulation {
         BoundaryType.SCALAR_NEUMANN
       );
       this.boundaryConditionsPass!.executeForTexture(
-        smokePassEncoder,
+        computePassEncoder,
         "smokeDensity",
         smokeBoundaryUniforms,
         this.textureManager!,
@@ -616,7 +600,7 @@ class SmokeSimulation {
         SIMULATION_CONSTANTS.physics.smokeDiffusion
       );
       this.smokeDiffusionPass!.executeIterations(
-        smokePassEncoder,
+        computePassEncoder,
         smokeDiffusionUniforms,
         this.textureManager!,
         SIMULATION_CONSTANTS.compute.workgroupCount,
@@ -630,7 +614,7 @@ class SmokeSimulation {
         SIMULATION_CONSTANTS.physics.smokeDissipationFactor
       );
       this.smokeDissipationPass!.executeWithUniforms(
-        smokePassEncoder,
+        computePassEncoder,
         smokeDissipationUniforms,
         this.textureManager!,
         SIMULATION_CONSTANTS.compute.workgroupCount
@@ -643,7 +627,7 @@ class SmokeSimulation {
         realTimeTimestep
       );
       this.advectParticlesPass!.executeWithUniforms(
-        smokePassEncoder,
+        computePassEncoder,
         advectParticlesUniforms,
         this.textureManager!,
         SIMULATION_CONSTANTS.compute.workgroupCount
@@ -651,7 +635,7 @@ class SmokeSimulation {
       this.textureManager!.swap("smokeParticlePosition");
     }
 
-    smokePassEncoder.end();
+    computePassEncoder.end();
   }
 
   public getPerformanceMetrics() {
