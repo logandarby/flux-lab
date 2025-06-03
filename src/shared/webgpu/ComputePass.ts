@@ -49,11 +49,15 @@ export abstract class ComputePass<TextureID extends string | number> {
     return { pipeline, bindGroupLayout };
   }
 
+  // To be implemented by subclasses
+  // Create a bindgroup layout for the desired shader
   protected abstract createBindGroupLayout(): GPUBindGroupLayout;
+  // Create a bindgroup for the desired shader-- to be cached in the subclass
   protected abstract createBindGroup(
     bindGroupArgs: BindGroupArgs<TextureID>
   ): GPUBindGroup;
 
+  // Utility function to validate required arguments for the class
   protected validateArgs(
     args: BindGroupArgs<TextureID>,
     required: (keyof BindGroupArgs<TextureID>)[]

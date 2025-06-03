@@ -7,7 +7,8 @@ import { usePersistedState } from "@/shared/utils/localStorage.utils";
 import { PerformanceViewer } from "@/lib/performance";
 import type { PerformanceMetrics } from "@/lib/performance";
 import { usePerformanceToggle } from "@/lib/performance";
-import { type SmokeTextureID, SIMULATION_CONSTANTS } from "./constants";
+import { SIMULATION_CONSTANTS } from "./constants";
+import { type SmokeTextureID } from "./types";
 
 const CANVAS_HEIGHT = 512;
 const CANVAS_WIDTH = CANVAS_HEIGHT;

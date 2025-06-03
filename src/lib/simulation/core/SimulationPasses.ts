@@ -15,7 +15,7 @@ import {
   type UniformData,
 } from "@/shared/webgpu/UniformManager";
 
-import type { SmokeTextureID } from "./constants";
+import type { SmokeTextureID } from "./types";
 import { SHADERS, wgsl } from "../shaders";
 
 /**
@@ -309,10 +309,34 @@ abstract class IterativeComputePass<
   TTextureID extends string,
   TUniform extends UniformData,
 > extends UniformComputePass<TTextureID, TUniform> {
+  private cachedBindGroupSwaps: [GPUBindGroup, GPUBindGroup] | null = null;
+
   /**
    * Subclasses must specify which texture to swap between iterations.
    */
   protected abstract getSwapTextureId(): TTextureID;
+
+  protected getCachedBindGroups(
+    uniformData: TUniform,
+    textureManager: TextureManager<TTextureID>
+  ): [GPUBindGroup, GPUBindGroup] {
+    if (this.cachedBindGroupSwaps) {
+      return this.cachedBindGroupSwaps;
+    }
+    const uniformBuffer = this.uniformManager.getBuffer(uniformData);
+    const bindGroup1 = this.createBindGroup({
+      textureManager,
+      uniformBuffer,
+    });
+    textureManager.swap(this.getSwapTextureId());
+    const bindGroup2 = this.createBindGroup({
+      textureManager,
+      uniformBuffer,
+    });
+    textureManager.swap(this.getSwapTextureId());
+    this.cachedBindGroupSwaps = [bindGroup1, bindGroup2];
+    return this.cachedBindGroupSwaps;
+  }
 
   /**
    * Execute multiple iterations of the pass.
@@ -324,14 +348,11 @@ abstract class IterativeComputePass<
     workgroupCount: number,
     iterations: number
   ): void {
+    const bindGroups = this.getCachedBindGroups(uniformData, textureManager);
+    pass.setPipeline(this.pipeline);
     for (let i = 0; i < iterations; i++) {
-      this.executeWithUniforms(
-        pass,
-        uniformData,
-        textureManager,
-        workgroupCount
-      );
-      textureManager.swap(this.getSwapTextureId());
+      pass.setBindGroup(0, bindGroups[i % 2]);
+      pass.dispatchWorkgroups(workgroupCount, workgroupCount);
     }
   }
 }

@@ -40,11 +40,11 @@ import {
 } from "@/shared/webgpu/UniformManager";
 import {
   type SmokeTextureID,
-  SIMULATION_CONSTANTS,
   type SimulationStepConfig,
   DEFAULT_VELOCITY_CONTROLS,
   DEFAULT_SMOKE_CONTROLS,
-} from "./constants";
+} from "./types";
+import { SIMULATION_CONSTANTS } from "./constants";
 import { wgsl } from "@/lib/preprocessor/core/wgsl";
 import { SHADERS } from "../shaders";
 

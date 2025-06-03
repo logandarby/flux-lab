@@ -7,7 +7,7 @@ import {
   WebGPUErrorCode,
   initializeWebGPU,
 } from "@/shared/webgpu/webgpu.utils";
-import type { SmokeTextureID } from "../../core/constants";
+import type { SmokeTextureID } from "../../core/types";
 import { ComputePass, type BindGroupArgs } from "@/shared/webgpu/ComputePass";
 import { RenderPass, ShaderMode } from "@/shared/webgpu/RenderPass";
 import { wgsl } from "@/lib/preprocessor";
