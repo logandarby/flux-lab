@@ -368,253 +368,16 @@ class SmokeSimulation {
 
     const commandEncoder = this.resources.device.createCommandEncoder();
 
+    // Compute Pass -- Step simulation forward
     if (!renderOnly) {
-      // Velocity advection
-      if (velocityControls.enableAdvection) {
-        const advectionUniforms = new AdvectionUniforms(
-          realTimeTimestep,
-          SIMULATION_CONSTANTS.physics.velocityAdvection
-        );
-
-        const advectionPassEncoder = commandEncoder.beginComputePass({
-          label: "Advection Compute Pass",
-        });
-        this.advectionPass.executeWithUniforms(
-          advectionPassEncoder,
-          advectionUniforms,
-          this.textureManager,
-          SIMULATION_CONSTANTS.compute.workgroupCount
-        );
-        advectionPassEncoder.end();
-        this.textureManager.swap("velocity");
-      }
-
-      // Velocity diffusion
-      if (velocityControls.enableDiffusion) {
-        const diffusionUniforms = new DiffusionUniforms(
-          realTimeTimestep,
-          SIMULATION_CONSTANTS.physics.diffusionFactor
-        );
-
-        const diffusionPassEncoder = commandEncoder.beginComputePass({
-          label: "Diffusion Compute Pass",
-        });
-        this.diffusionPass.executeIterations(
-          diffusionPassEncoder,
-          diffusionUniforms,
-          this.textureManager,
-          SIMULATION_CONSTANTS.compute.workgroupCount,
-          SIMULATION_CONSTANTS.iterations.diffusion
-        );
-        diffusionPassEncoder.end();
-      }
-
-      // Divergence calculation
-      if (velocityControls.enableDivergence) {
-        const divergenceUniforms = new DivergenceUniforms(
-          SIMULATION_CONSTANTS.grid.scale
-        );
-
-        const divergencePassEncoder = commandEncoder.beginComputePass({
-          label: "Divergence Compute Pass",
-        });
-        this.divergencePass.executeWithUniforms(
-          divergencePassEncoder,
-          divergenceUniforms,
-          this.textureManager,
-          SIMULATION_CONSTANTS.compute.workgroupCount
-        );
-        divergencePassEncoder.end();
-      }
-
-      // Pressure projection
-      if (velocityControls.enablePressureProjection) {
-        const pressureUniforms = new PressureUniforms(
-          SIMULATION_CONSTANTS.grid.scale
-        );
-
-        const pressurePassEncoder = commandEncoder.beginComputePass({
-          label: "Pressure Compute Pass",
-        });
-        this.pressurePass.executeIterations(
-          pressurePassEncoder,
-          pressureUniforms,
-          this.textureManager,
-          SIMULATION_CONSTANTS.compute.workgroupCount,
-          SIMULATION_CONSTANTS.iterations.pressure
-        );
-        pressurePassEncoder.end();
-      }
-
-      // Pressure boundary conditions
-      if (velocityControls.enablePressureBoundaryConditions) {
-        const pressureBoundaryUniforms = new BoundaryUniforms(
-          BoundaryType.SCALAR_NEUMANN
-        );
-        const pressureBoundaryPassEncoder = commandEncoder.beginComputePass({
-          label: "Pressure Boundary Conditions Compute Pass",
-        });
-        this.boundaryConditionsPass.executeForTexture(
-          pressureBoundaryPassEncoder,
-          "pressure",
-          pressureBoundaryUniforms,
-          this.textureManager,
-          SIMULATION_CONSTANTS.compute.workgroupCount
-        );
-        pressureBoundaryPassEncoder.end();
-        this.textureManager.swap("pressure");
-      }
-
-      // Gradient subtraction
-      if (velocityControls.enableGradientSubtraction) {
-        const gradientUniforms = new GradientSubtractionUniforms(
-          SIMULATION_CONSTANTS.grid.scale
-        );
-
-        const gradientPassEncoder = commandEncoder.beginComputePass({
-          label: "Gradient Subtraction Compute Pass",
-        });
-        this.gradientSubtractionPass.executeWithUniforms(
-          gradientPassEncoder,
-          gradientUniforms,
-          this.textureManager,
-          SIMULATION_CONSTANTS.compute.workgroupCount
-        );
-        gradientPassEncoder.end();
-        this.textureManager.swap("velocity");
-      }
-
-      // Velocity boundary conditions
-      if (velocityControls.enableVelocityBoundaryConditions) {
-        const velocityBoundaryUniforms = new BoundaryUniforms(
-          BoundaryType.NO_SLIP_VELOCITY
-        );
-        const velocityBoundaryPassEncoder = commandEncoder.beginComputePass({
-          label: "Velocity Boundary Conditions Compute Pass",
-        });
-        this.boundaryConditionsPass.executeForTexture(
-          velocityBoundaryPassEncoder,
-          "velocity",
-          velocityBoundaryUniforms,
-          this.textureManager,
-          SIMULATION_CONSTANTS.compute.workgroupCount
-        );
-        velocityBoundaryPassEncoder.end();
-        this.textureManager.swap("velocity");
-      }
-
-      // Velocity dissipation
-      if (velocityControls.enableDissipation) {
-        const velocityDissipationUniforms = new DissipationUniforms(
-          SIMULATION_CONSTANTS.physics.velocityDissipationFactor
-        );
-        const velocityDissipationPassEncoder = commandEncoder.beginComputePass({
-          label: "Velocity Dissipation Compute Pass",
-        });
-        this.velocityDissipationPass.executeWithUniforms(
-          velocityDissipationPassEncoder,
-          velocityDissipationUniforms,
-          this.textureManager,
-          SIMULATION_CONSTANTS.compute.workgroupCount
-        );
-        velocityDissipationPassEncoder.end();
-        this.textureManager.swap("velocity");
-      }
-
-      // Smoke advection
-      if (smokeControls.enableAdvection) {
-        const smokeAdvectionUniforms = new AdvectionUniforms(
-          realTimeTimestep,
-          SIMULATION_CONSTANTS.physics.smokeAdvection
-        );
-        const smokeDensityPassEncoder = commandEncoder.beginComputePass({
-          label: "Smoke Density Advection Compute Pass",
-        });
-        this.smokeAdvectionPass.executeWithUniforms(
-          smokeDensityPassEncoder,
-          smokeAdvectionUniforms,
-          this.textureManager,
-          SIMULATION_CONSTANTS.compute.workgroupCount
-        );
-        smokeDensityPassEncoder.end();
-        this.textureManager.swap("smokeDensity");
-      }
-
-      // Smoke boundary conditions
-      if (smokeControls.enableBoundaryConditions) {
-        const smokeBoundaryUniforms = new BoundaryUniforms(
-          BoundaryType.SCALAR_NEUMANN
-        );
-        const smokeBoundaryPassEncoder = commandEncoder.beginComputePass({
-          label: "Smoke Boundary Conditions Compute Pass",
-        });
-        this.boundaryConditionsPass.executeForTexture(
-          smokeBoundaryPassEncoder,
-          "smokeDensity",
-          smokeBoundaryUniforms,
-          this.textureManager,
-          SIMULATION_CONSTANTS.compute.workgroupCount
-        );
-        smokeBoundaryPassEncoder.end();
-        this.textureManager.swap("smokeDensity");
-      }
-    }
-
-    // Smoke diffusion
-    if (smokeControls.enableDiffusion) {
-      const smokeDiffusionUniforms = new DiffusionUniforms(
-        realTimeTimestep,
-        SIMULATION_CONSTANTS.physics.smokeDiffusion
-      );
-      const smokeDiffusionPassEncoder = commandEncoder.beginComputePass({
-        label: "Smoke Density Diffusion Compute Pass",
-      });
-      this.smokeDiffusionPass.executeIterations(
-        smokeDiffusionPassEncoder,
-        smokeDiffusionUniforms,
-        this.textureManager,
-        SIMULATION_CONSTANTS.compute.workgroupCount,
-        SIMULATION_CONSTANTS.iterations.diffusion
-      );
-      smokeDiffusionPassEncoder.end();
-      this.textureManager.swap("smokeDensity");
-    }
-
-    // Smoke dissipation
-    if (smokeControls.enableDissipation) {
-      const smokeDissipationUniforms = new DissipationUniforms(
-        SIMULATION_CONSTANTS.physics.smokeDissipationFactor
-      );
-      const smokeDissipationPassEncoder = commandEncoder.beginComputePass({
-        label: "Smoke Density Dissipation Compute Pass",
-      });
-      this.smokeDissipationPass.executeWithUniforms(
-        smokeDissipationPassEncoder,
-        smokeDissipationUniforms,
-        this.textureManager,
-        SIMULATION_CONSTANTS.compute.workgroupCount
-      );
-      smokeDissipationPassEncoder.end();
-      this.textureManager.swap("smokeDensity");
-    }
-
-    // Advect particles
-    if (smokeControls.enableAdvectParticles) {
-      const advectParticlesUniforms = new AdvectParticlesUniforms(
+      this.executeComputePasses(
+        commandEncoder,
+        velocityControls,
+        smokeControls,
         realTimeTimestep
       );
-      const advectParticlesPassEncoder = commandEncoder.beginComputePass({
-        label: "Advect Particles Compute Pass",
-      });
-      this.advectParticlesPass.executeWithUniforms(
-        advectParticlesPassEncoder,
-        advectParticlesUniforms,
-        this.textureManager,
-        SIMULATION_CONSTANTS.compute.workgroupCount
-      );
-      advectParticlesPassEncoder.end();
-      this.textureManager.swap("smokeParticlePosition");
     }
+
     // Render Pass
     // Ensure canvas context is properly configured with current device
     this.resources.context.configure({
@@ -677,6 +440,218 @@ class SmokeSimulation {
     // Record JS performance time
     const jsElapsed = performance.now() - jsStartTime;
     this.performanceTracker.recordJS(jsElapsed);
+  }
+
+  private executeComputePasses(
+    commandEncoder: GPUCommandEncoder,
+    velocityControls: typeof DEFAULT_VELOCITY_CONTROLS,
+    smokeControls: typeof DEFAULT_SMOKE_CONTROLS,
+    realTimeTimestep: number
+  ) {
+    // Combined pass for operations that can be batched together
+    const combinedPassEncoder = commandEncoder.beginComputePass({
+      label: "Combined Fluid Simulation Pass",
+    });
+
+    // Execute velocity operations that can be batched
+    if (velocityControls.enableAdvection) {
+      const advectionUniforms = new AdvectionUniforms(
+        realTimeTimestep,
+        SIMULATION_CONSTANTS.physics.velocityAdvection
+      );
+      this.advectionPass!.executeWithUniforms(
+        combinedPassEncoder,
+        advectionUniforms,
+        this.textureManager!,
+        SIMULATION_CONSTANTS.compute.workgroupCount
+      );
+      this.textureManager!.swap("velocity");
+    }
+
+    if (velocityControls.enableDiffusion) {
+      const diffusionUniforms = new DiffusionUniforms(
+        realTimeTimestep,
+        SIMULATION_CONSTANTS.physics.diffusionFactor
+      );
+      this.diffusionPass!.executeIterations(
+        combinedPassEncoder,
+        diffusionUniforms,
+        this.textureManager!,
+        SIMULATION_CONSTANTS.compute.workgroupCount,
+        SIMULATION_CONSTANTS.iterations.diffusion
+      );
+    }
+
+    if (velocityControls.enableDivergence) {
+      const divergenceUniforms = new DivergenceUniforms(
+        SIMULATION_CONSTANTS.grid.scale
+      );
+      this.divergencePass!.executeWithUniforms(
+        combinedPassEncoder,
+        divergenceUniforms,
+        this.textureManager!,
+        SIMULATION_CONSTANTS.compute.workgroupCount
+      );
+    }
+
+    combinedPassEncoder.end();
+
+    // Pressure solving needs its own pass due to the iteration dependencies
+    if (velocityControls.enablePressureProjection) {
+      const pressurePassEncoder = commandEncoder.beginComputePass({
+        label: "Pressure Solver Pass",
+      });
+
+      const pressureUniforms = new PressureUniforms(
+        SIMULATION_CONSTANTS.grid.scale
+      );
+      this.pressurePass!.executeIterations(
+        pressurePassEncoder,
+        pressureUniforms,
+        this.textureManager!,
+        SIMULATION_CONSTANTS.compute.workgroupCount,
+        SIMULATION_CONSTANTS.iterations.pressure
+      );
+
+      pressurePassEncoder.end();
+    }
+
+    // Post-pressure operations
+    const postPressurePassEncoder = commandEncoder.beginComputePass({
+      label: "Post-pressure Operations Pass",
+    });
+
+    if (velocityControls.enablePressureBoundaryConditions) {
+      const pressureBoundaryUniforms = new BoundaryUniforms(
+        BoundaryType.SCALAR_NEUMANN
+      );
+      this.boundaryConditionsPass!.executeForTexture(
+        postPressurePassEncoder,
+        "pressure",
+        pressureBoundaryUniforms,
+        this.textureManager!,
+        SIMULATION_CONSTANTS.compute.workgroupCount
+      );
+      this.textureManager!.swap("pressure");
+    }
+
+    if (velocityControls.enableGradientSubtraction) {
+      const gradientUniforms = new GradientSubtractionUniforms(
+        SIMULATION_CONSTANTS.grid.scale
+      );
+      this.gradientSubtractionPass!.executeWithUniforms(
+        postPressurePassEncoder,
+        gradientUniforms,
+        this.textureManager!,
+        SIMULATION_CONSTANTS.compute.workgroupCount
+      );
+      this.textureManager!.swap("velocity");
+    }
+
+    if (velocityControls.enableVelocityBoundaryConditions) {
+      const velocityBoundaryUniforms = new BoundaryUniforms(
+        BoundaryType.NO_SLIP_VELOCITY
+      );
+      this.boundaryConditionsPass!.executeForTexture(
+        postPressurePassEncoder,
+        "velocity",
+        velocityBoundaryUniforms,
+        this.textureManager!,
+        SIMULATION_CONSTANTS.compute.workgroupCount
+      );
+      this.textureManager!.swap("velocity");
+    }
+
+    if (velocityControls.enableDissipation) {
+      const velocityDissipationUniforms = new DissipationUniforms(
+        SIMULATION_CONSTANTS.physics.velocityDissipationFactor
+      );
+      this.velocityDissipationPass!.executeWithUniforms(
+        postPressurePassEncoder,
+        velocityDissipationUniforms,
+        this.textureManager!,
+        SIMULATION_CONSTANTS.compute.workgroupCount
+      );
+      this.textureManager!.swap("velocity");
+    }
+
+    postPressurePassEncoder.end();
+
+    // Smoke operations are batched together
+    const smokePassEncoder = commandEncoder.beginComputePass({
+      label: "Smoke Operations Pass",
+    });
+
+    if (smokeControls.enableAdvection) {
+      const smokeAdvectionUniforms = new AdvectionUniforms(
+        realTimeTimestep,
+        SIMULATION_CONSTANTS.physics.smokeAdvection
+      );
+      this.smokeAdvectionPass!.executeWithUniforms(
+        smokePassEncoder,
+        smokeAdvectionUniforms,
+        this.textureManager!,
+        SIMULATION_CONSTANTS.compute.workgroupCount
+      );
+      this.textureManager!.swap("smokeDensity");
+    }
+
+    if (smokeControls.enableBoundaryConditions) {
+      const smokeBoundaryUniforms = new BoundaryUniforms(
+        BoundaryType.SCALAR_NEUMANN
+      );
+      this.boundaryConditionsPass!.executeForTexture(
+        smokePassEncoder,
+        "smokeDensity",
+        smokeBoundaryUniforms,
+        this.textureManager!,
+        SIMULATION_CONSTANTS.compute.workgroupCount
+      );
+      this.textureManager!.swap("smokeDensity");
+    }
+
+    if (smokeControls.enableDiffusion) {
+      const smokeDiffusionUniforms = new DiffusionUniforms(
+        realTimeTimestep,
+        SIMULATION_CONSTANTS.physics.smokeDiffusion
+      );
+      this.smokeDiffusionPass!.executeIterations(
+        smokePassEncoder,
+        smokeDiffusionUniforms,
+        this.textureManager!,
+        SIMULATION_CONSTANTS.compute.workgroupCount,
+        SIMULATION_CONSTANTS.iterations.diffusion
+      );
+      this.textureManager!.swap("smokeDensity");
+    }
+
+    if (smokeControls.enableDissipation) {
+      const smokeDissipationUniforms = new DissipationUniforms(
+        SIMULATION_CONSTANTS.physics.smokeDissipationFactor
+      );
+      this.smokeDissipationPass!.executeWithUniforms(
+        smokePassEncoder,
+        smokeDissipationUniforms,
+        this.textureManager!,
+        SIMULATION_CONSTANTS.compute.workgroupCount
+      );
+      this.textureManager!.swap("smokeDensity");
+    }
+
+    if (smokeControls.enableAdvectParticles) {
+      const advectParticlesUniforms = new AdvectParticlesUniforms(
+        realTimeTimestep
+      );
+      this.advectParticlesPass!.executeWithUniforms(
+        smokePassEncoder,
+        advectParticlesUniforms,
+        this.textureManager!,
+        SIMULATION_CONSTANTS.compute.workgroupCount
+      );
+      this.textureManager!.swap("smokeParticlePosition");
+    }
+
+    smokePassEncoder.end();
   }
 
   public getPerformanceMetrics() {
