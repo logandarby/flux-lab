@@ -3,7 +3,7 @@ import type { SimulationConstants } from "./types";
 // Default simulation constants
 export const SIMULATION_CONSTANTS: SimulationConstants = {
   grid: {
-    size: { width: 2 ** 9, height: 2 ** 9 },
+    size: { width: 2 ** 9, height: 2 ** 8 },
     scale: 1,
   },
 
@@ -21,7 +21,7 @@ export const SIMULATION_CONSTANTS: SimulationConstants = {
     diffusionFactor: 10, // Smaller = slower diffusion
     velocityAdvection: 10, // Smaller = slower velocity advection
     smokeAdvection: 20,
-    smokeDiffusion: 5,
+    smokeDiffusion: 1.1,
     smokeDissipationFactor: 0.995, // Multiplication factor for smoke density each frame
     velocityDissipationFactor: 0.995, // Similarly for velocity magnitude
   },

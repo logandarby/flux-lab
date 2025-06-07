@@ -286,7 +286,7 @@ abstract class UniformComputePass<
     textureManager: TextureManager<TTextureID>,
     workgroupCount: number
   ): void {
-    const uniformBuffer = this.uniformManager.getBuffer(uniformData);
+    const uniformBuffer = this.uniformManager.updateBuffer(uniformData);
     const bindGroup = this.createBindGroup({
       textureManager,
       uniformBuffer,
@@ -323,7 +323,7 @@ abstract class IterativeComputePass<
     if (this.cachedBindGroupSwaps) {
       return this.cachedBindGroupSwaps;
     }
-    const uniformBuffer = this.uniformManager.getBuffer(uniformData);
+    const uniformBuffer = this.uniformManager.updateBuffer(uniformData);
     const bindGroup1 = this.createBindGroup({
       textureManager,
       uniformBuffer,
@@ -998,7 +998,7 @@ export class BoundaryConditionsPass extends UniformComputePass<
       ? this.getVelocityPipeline()
       : this.getScalarPipeline();
 
-    const uniformBuffer = this.uniformManager.getBuffer(uniformData);
+    const uniformBuffer = this.uniformManager.updateBuffer(uniformData);
 
     const bindGroup = this.device.createBindGroup({
       label: `Boundary ${textureId} Bind Group`,

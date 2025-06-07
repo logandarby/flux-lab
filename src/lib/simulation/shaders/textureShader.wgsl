@@ -140,29 +140,6 @@ fn addNoise(color: vec4f, texCoord: vec2f) -> vec4f {
     return color + noise * magnitude + baseNoise;
 }
 
-// TODO: This is currently inefficient. We should be using instanced particle rendering/compute particle rendering probably.
-fn shadeParticles(particlePosition: vec2f, input: VertexOutput) -> vec4f {
-    // Since texcoord is in [0, 1] we need to multiply by grid size to get the actual position512.0, 512.0);
-    let gridSize = vec2f(512.0, 512.0);
-    let currentPos = input.texCoord * gridSize;
-    
-    // Calculate distance from current pixel to particle position
-    let distance = length(currentPos - particlePosition);
-    let particleRadius = 2.0; // Particle size in pixels
-    
-    // Render particle as a circle with smooth falloff
-    if (distance <= particleRadius) {
-        let falloff = 1.0 - (distance / particleRadius);
-        let intensity = falloff * falloff; // Smooth falloff
-        
-        // Particle color (could be based on velocity, density, etc.)
-        let particleColor = vec3f(1.0, 0.8, 0.4); // Warm orange
-        return vec4f(particleColor * intensity, intensity);
-    }
-
-    return vec4f(0.0, 0.0, 0.0, 0.0);
-}
-
 @fragment
 fn fragment_main(input: VertexOutput) -> @location(0)vec4f {
     let value = textureSample(texture, textureSampler, input.texCoord);
@@ -178,9 +155,6 @@ fn fragment_main(input: VertexOutput) -> @location(0)vec4f {
         }
         case DENSITY_MODE: {
             output = shadeDensity(value.x, input);
-        }
-        case PARTICLES_MODE: {
-            output = shadeParticles(value.xy, input);
         }
         default: {
             output = vec4(1, 1, 1, 1);

@@ -20,8 +20,9 @@ import {
   SelectValue,
 } from "@/shared/ui/select";
 
-const CANVAS_HEIGHT = 512;
-const CANVAS_WIDTH = CANVAS_HEIGHT;
+const CANVAS_SCALE = 2;
+const CANVAS_HEIGHT = SIMULATION_CONSTANTS.grid.size.height * CANVAS_SCALE;
+const CANVAS_WIDTH = SIMULATION_CONSTANTS.grid.size.width * CANVAS_SCALE;
 
 // Visualization mode options
 const VISUALIZATION_MODES = [

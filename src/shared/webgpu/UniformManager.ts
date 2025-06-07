@@ -212,7 +212,7 @@ export class UniformManager<T extends UniformData> {
    *
    * The returned buffer is ready to bind to a compute pass.
    */
-  public getBuffer(data: T): GPUBuffer {
+  public updateBuffer(data: T): GPUBuffer {
     const dataHash = this.getDataHash(data);
 
     // Check if we can reuse the existing buffer
