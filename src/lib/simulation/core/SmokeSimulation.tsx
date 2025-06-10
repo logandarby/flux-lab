@@ -8,7 +8,7 @@ import {
 } from "@/shared/webgpu/webgpu.utils";
 import { TextureManager } from "@/shared/webgpu/TextureManager";
 import { RenderPass, ShaderMode } from "@/shared/webgpu/RenderPass";
-import { PerformanceTracker } from "@/lib/performance";
+import { PerformanceTracker, type PerformanceMetrics } from "@/lib/performance";
 import {
   VelocityAdvectionPass,
   DiffusionPass,
@@ -43,83 +43,37 @@ import {
   type SimulationStepConfig,
   DEFAULT_VELOCITY_CONTROLS,
   DEFAULT_SMOKE_CONTROLS,
+  type SmokeSimulationConfig,
 } from "./types";
 import { SIMULATION_CONSTANTS } from "./constants";
 import { wgsl } from "@/lib/preprocessor/core/wgsl";
 import { SHADERS } from "../shaders";
+import { FLOAT_BYTES } from "./constants";
+import { createScalarField2D, createVectorField2D } from "../utils";
+import type { ScalarField2D, VectorField2D } from "../utils";
 
-function initializeTextures(
-  textureManager: TextureManager<SmokeTextureID>,
-  device: GPUDevice
-): void {
-  const gridSize = SIMULATION_CONSTANTS.grid.size;
-  const particleSize = SIMULATION_CONSTANTS.particles.smokeDimensions;
-  const totalGridPixels = gridSize.width * gridSize.height;
-  const totalParticlePixels = particleSize.width * particleSize.height;
-
-  // Pre-allocate buffers to reduce memory allocations
-  const velocityData = new Float32Array(totalGridPixels * 2); // 2 channels
-  const smokeDensityData = new Float32Array(totalGridPixels); // 1 channel (already zeros)
-  const pressureData = new Float32Array(totalGridPixels); // 1 channel (already zeros)
-  const particlePositionData = new Float32Array(totalParticlePixels * 2); // 2 channels
-
-  // Initialize particle positions efficiently
-  for (let y = 0; y < particleSize.height; y++) {
-    for (let x = 0; x < particleSize.width; x++) {
-      const index = (x + y * particleSize.width) * 2;
-      particlePositionData[index] = (x / particleSize.width) * gridSize.width;
-      particlePositionData[index + 1] =
-        (y / particleSize.height) * gridSize.height;
-    }
-  }
-
-  // Write all textures
-  const velocityTexture = textureManager.getCurrentTexture("velocity");
-  device.queue.writeTexture(
-    { texture: velocityTexture },
-    velocityData,
-    { bytesPerRow: gridSize.width * 2 * 4 },
-    gridSize
-  );
-
-  const smokeDensityTexture = textureManager.getCurrentTexture("smokeDensity");
-  device.queue.writeTexture(
-    { texture: smokeDensityTexture },
-    smokeDensityData,
-    { bytesPerRow: gridSize.width * 4 },
-    gridSize
-  );
-
-  const smokeParticlePositionsTexture = textureManager.getCurrentTexture(
-    "smokeParticlePosition"
-  );
-  device.queue.writeTexture(
-    { texture: smokeParticlePositionsTexture },
-    particlePositionData,
-    { bytesPerRow: particleSize.width * 4 * 2 },
-    particleSize
-  );
-
-  // Initialize pressure textures
-  const pressureTexture = textureManager.getCurrentTexture("pressure");
-  const pressureBackTexture = textureManager.getBackTexture("pressure");
-
-  device.queue.writeTexture(
-    { texture: pressureTexture },
-    pressureData,
-    { bytesPerRow: gridSize.width * 4 },
-    gridSize
-  );
-
-  device.queue.writeTexture(
-    { texture: pressureBackTexture },
-    pressureData,
-    { bytesPerRow: gridSize.width * 4 },
-    gridSize
-  );
+export interface SmokeTextureExports {
+  smokeDensity: ScalarField2D;
+  velocity: VectorField2D;
+  pressure: ScalarField2D;
 }
 
-class SmokeSimulation {
+interface ISmokeSimulation {
+  initialize(canvas: React.RefObject<HTMLCanvasElement>): void;
+  destroy(): void;
+
+  step(config: SmokeSimulationConfig): void;
+  reset(): void;
+
+  addSmoke(x: number, y: number): void;
+  addVelocity(x: number, y: number, velocityX: number, velocityY: number): void;
+
+  sampleTextures(downSample: number): Promise<SmokeTextureExports>;
+
+  getPerformanceMetrics(): PerformanceMetrics;
+}
+
+class SmokeSimulation implements ISmokeSimulation {
   private resources: WebGPUResources | null = null;
   private textureManager: TextureManager<SmokeTextureID> | null = null;
   private performanceTracker = new PerformanceTracker();
@@ -174,7 +128,8 @@ class SmokeSimulation {
       usage:
         GPUTextureUsage.STORAGE_BINDING |
         GPUTextureUsage.TEXTURE_BINDING |
-        GPUTextureUsage.COPY_DST,
+        GPUTextureUsage.COPY_DST |
+        GPUTextureUsage.COPY_SRC,
     });
 
     // Create divergence texture
@@ -196,7 +151,8 @@ class SmokeSimulation {
       usage:
         GPUTextureUsage.STORAGE_BINDING |
         GPUTextureUsage.TEXTURE_BINDING |
-        GPUTextureUsage.COPY_DST,
+        GPUTextureUsage.COPY_DST |
+        GPUTextureUsage.COPY_SRC,
     });
 
     // Smoke particle texture (positions)
@@ -218,7 +174,8 @@ class SmokeSimulation {
       usage:
         GPUTextureUsage.STORAGE_BINDING |
         GPUTextureUsage.TEXTURE_BINDING |
-        GPUTextureUsage.COPY_DST,
+        GPUTextureUsage.COPY_DST |
+        GPUTextureUsage.COPY_SRC,
     });
 
     initializeTextures(this.textureManager, this.resources.device);
@@ -642,6 +599,127 @@ class SmokeSimulation {
     return this.performanceTracker.getMetrics();
   }
 
+  public async sampleTextures(
+    downSample: number = 1
+  ): Promise<SmokeTextureExports> {
+    if (!this.resources || !this.textureManager || !this.isInitialized) {
+      throw new WebGPUError(
+        "Could not sample textures: Resources not initialized",
+        WebGPUErrorCode.NO_RESOURCES
+      );
+    }
+
+    const gridSize = SIMULATION_CONSTANTS.grid.size;
+    const sampledWidth = Math.floor(gridSize.width / downSample);
+    const sampledHeight = Math.floor(gridSize.height / downSample);
+    const sampledPixels = sampledWidth * sampledHeight;
+
+    // Create staging buffers for reading texture data
+    const smokeDensityBuffer = this.resources.device.createBuffer({
+      label: "Smoke Density Staging Buffer",
+      size: sampledPixels * FLOAT_BYTES, // 1 float32 per pixel
+      usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ,
+    });
+
+    const velocityBuffer = this.resources.device.createBuffer({
+      label: "Velocity Staging Buffer",
+      size: sampledPixels * FLOAT_BYTES * 2, // 2 float32s per pixel
+      usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ,
+    });
+
+    const pressureBuffer = this.resources.device.createBuffer({
+      label: "Pressure Staging Buffer",
+      size: sampledPixels * FLOAT_BYTES, // 1 float32 per pixel
+      usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ,
+    });
+
+    // Create command encoder for copying texture data
+    const commandEncoder = this.resources.device.createCommandEncoder({
+      label: "Texture Sampling Command Encoder",
+    });
+
+    // Copy texture data to staging buffers
+    commandEncoder.copyTextureToBuffer(
+      { texture: this.textureManager.getCurrentTexture("smokeDensity") },
+      {
+        buffer: smokeDensityBuffer,
+        bytesPerRow: sampledWidth * FLOAT_BYTES,
+      },
+      { width: sampledWidth, height: sampledHeight }
+    );
+
+    commandEncoder.copyTextureToBuffer(
+      { texture: this.textureManager.getCurrentTexture("velocity") },
+      {
+        buffer: velocityBuffer,
+        bytesPerRow: sampledWidth * FLOAT_BYTES * 2,
+      },
+      { width: sampledWidth, height: sampledHeight }
+    );
+
+    commandEncoder.copyTextureToBuffer(
+      { texture: this.textureManager.getCurrentTexture("pressure") },
+      {
+        buffer: pressureBuffer,
+        bytesPerRow: sampledWidth * FLOAT_BYTES,
+      },
+      { width: sampledWidth, height: sampledHeight }
+    );
+
+    this.resources.device.queue.submit([commandEncoder.finish()]);
+    await this.resources.device.queue.onSubmittedWorkDone();
+
+    await Promise.all([
+      smokeDensityBuffer.mapAsync(GPUMapMode.READ),
+      velocityBuffer.mapAsync(GPUMapMode.READ),
+      pressureBuffer.mapAsync(GPUMapMode.READ),
+    ]);
+
+    const smokeDensityData = new Float32Array(
+      smokeDensityBuffer.getMappedRange()
+    );
+    const velocityRawData = new Float32Array(velocityBuffer.getMappedRange());
+    const pressureData = new Float32Array(pressureBuffer.getMappedRange());
+
+    // Convert velocity data to array of vec2 tuples
+    const velocityData: Array<[number, number]> = [];
+    for (let i = 0; i < velocityRawData.length; i += 2) {
+      velocityData.push([velocityRawData[i], velocityRawData[i + 1]]);
+    }
+
+    // Create Array2D structures with proper dimensions
+    const result: SmokeTextureExports = {
+      smokeDensity: createScalarField2D(
+        new Float32Array(smokeDensityData),
+        gridSize.width,
+        gridSize.height,
+        downSample
+      ),
+      velocity: createVectorField2D(
+        velocityData,
+        gridSize.width,
+        gridSize.height,
+        downSample
+      ),
+      pressure: createScalarField2D(
+        new Float32Array(pressureData),
+        gridSize.width,
+        gridSize.height,
+        downSample
+      ),
+    };
+
+    // Unmap and destroy staging buffers
+    smokeDensityBuffer.unmap();
+    velocityBuffer.unmap();
+    pressureBuffer.unmap();
+    smokeDensityBuffer.destroy();
+    velocityBuffer.destroy();
+    pressureBuffer.destroy();
+
+    return result;
+  }
+
   public reset(
     shaderMode: ShaderMode = ShaderMode.DENSITY,
     texture: SmokeTextureID = "smokeDensity"
@@ -774,6 +852,77 @@ class SmokeSimulation {
     console.log("SmokeSimulation destroyed");
     this.isInitialized = false;
   }
+}
+
+function initializeTextures(
+  textureManager: TextureManager<SmokeTextureID>,
+  device: GPUDevice
+): void {
+  const gridSize = SIMULATION_CONSTANTS.grid.size;
+  const particleSize = SIMULATION_CONSTANTS.particles.smokeDimensions;
+  const totalGridPixels = gridSize.width * gridSize.height;
+  const totalParticlePixels = particleSize.width * particleSize.height;
+
+  // Pre-allocate buffers to reduce memory allocations
+  const velocityData = new Float32Array(totalGridPixels * 2); // 2 channels
+  const smokeDensityData = new Float32Array(totalGridPixels); // 1 channel (already zeros)
+  const pressureData = new Float32Array(totalGridPixels); // 1 channel (already zeros)
+  const particlePositionData = new Float32Array(totalParticlePixels * 2); // 2 channels
+
+  // Initialize particle positions efficiently
+  for (let y = 0; y < particleSize.height; y++) {
+    for (let x = 0; x < particleSize.width; x++) {
+      const index = (x + y * particleSize.width) * 2;
+      particlePositionData[index] = (x / particleSize.width) * gridSize.width;
+      particlePositionData[index + 1] =
+        (y / particleSize.height) * gridSize.height;
+    }
+  }
+
+  // Write all textures
+  const velocityTexture = textureManager.getCurrentTexture("velocity");
+  device.queue.writeTexture(
+    { texture: velocityTexture },
+    velocityData,
+    { bytesPerRow: gridSize.width * 2 * FLOAT_BYTES },
+    gridSize
+  );
+
+  const smokeDensityTexture = textureManager.getCurrentTexture("smokeDensity");
+  device.queue.writeTexture(
+    { texture: smokeDensityTexture },
+    smokeDensityData,
+    { bytesPerRow: gridSize.width * FLOAT_BYTES },
+    gridSize
+  );
+
+  const smokeParticlePositionsTexture = textureManager.getCurrentTexture(
+    "smokeParticlePosition"
+  );
+  device.queue.writeTexture(
+    { texture: smokeParticlePositionsTexture },
+    particlePositionData,
+    { bytesPerRow: particleSize.width * FLOAT_BYTES * 2 },
+    particleSize
+  );
+
+  // Initialize pressure textures
+  const pressureTexture = textureManager.getCurrentTexture("pressure");
+  const pressureBackTexture = textureManager.getBackTexture("pressure");
+
+  device.queue.writeTexture(
+    { texture: pressureTexture },
+    pressureData,
+    { bytesPerRow: gridSize.width * FLOAT_BYTES },
+    gridSize
+  );
+
+  device.queue.writeTexture(
+    { texture: pressureBackTexture },
+    pressureData,
+    { bytesPerRow: gridSize.width * FLOAT_BYTES },
+    gridSize
+  );
 }
 
 export default SmokeSimulation;

@@ -11,6 +11,7 @@ import { FunctionCallTracker, RAFEventProcessor } from "@/lib/performance";
 import type { EventPerformanceMetrics } from "@/lib/performance";
 import { SIMULATION_CONSTANTS } from "./constants";
 import { type SmokeTextureID } from "./types";
+import type { SmokeTextureExports } from "./SmokeSimulation";
 import type { MouseEventData } from "@/lib/performance/types/eventMetrics";
 import {
   Select,
@@ -19,10 +20,36 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/shared/ui/select";
+import {
+  AudioEngine,
+  type Note,
+  type NoteVelocity,
+} from "@/lib/audio-engine/core/AudioEngine";
 
 const CANVAS_SCALE = 2;
 const CANVAS_HEIGHT = SIMULATION_CONSTANTS.grid.size.height * CANVAS_SCALE;
 const CANVAS_WIDTH = SIMULATION_CONSTANTS.grid.size.width * CANVAS_SCALE;
+
+// Audio constants
+const AUDIO_SAMPLE_INTERVAL_MS = 100; // Sample audio every 100ms
+const PENTATONIC_SCALE = [
+  // Three-octave major pentatonic scale in Hz (low to high)
+  261.63,
+  293.66,
+  329.63,
+  392.0,
+  440.0, // C4, D4, E4, G4, A4
+  523.25,
+  587.33,
+  659.25,
+  783.99,
+  880.0, // C5, D5, E5, G5, A5
+  1046.5,
+  1174.66,
+  1318.51,
+  1567.98,
+  1760.0, // C6, D6, E6, G6, A6
+];
 
 // Visualization mode options
 const VISUALIZATION_MODES = [
@@ -49,6 +76,7 @@ function SmokeSimulationComponent() {
   const animationFrameRef = useRef<number | null>(null);
   const [isInitialized, setIsInitialized] = useState(false);
   const [isPlaying, setIsPlaying] = useState(true);
+  const isPlayingRef = useRef<boolean>(true);
   const [initError, setInitError] = useState<string | null>(null);
 
   // Use refs for performance metrics to avoid React re-renders during animation
@@ -77,6 +105,14 @@ function SmokeSimulationComponent() {
   const isMouseDownRef = useRef(false);
   const previousMousePos = useRef<{ x: number; y: number } | null>(null);
   const lastInteractionTime = useRef<number>(0);
+
+  // Audio engine state
+  const audioEngine = useRef<AudioEngine | null>(null);
+  const audioInitialized = useRef<boolean>(false);
+  const currentMousePos = useRef<{ x: number; y: number } | null>(null);
+  const lastPlayedNote = useRef<Note | null>(null);
+  const sampledTextureData = useRef<SmokeTextureExports | null>(null);
+  const samplingIntervalRef = useRef<number | null>(null);
 
   // Cache canvas bounds to avoid frequent getBoundingClientRect calls
   const canvasBoundsRef = useRef<DOMRect | null>(null);
@@ -110,6 +146,15 @@ function SmokeSimulationComponent() {
     return canvasBoundsRef.current;
   }, []);
 
+  // Helper function to compare if two notes are the same
+  const areNotesEqual = useCallback(
+    (note1: Note | null, note2: Note): boolean => {
+      if (!note1) return false;
+      return note1.pitch === note2.pitch && note1.velocity === note2.velocity;
+    },
+    []
+  );
+
   // Helper function to convert canvas coordinates to grid coordinates
   const canvasToGridCoords = useCallback(
     (clientX: number, clientY: number) => {
@@ -131,6 +176,91 @@ function SmokeSimulationComponent() {
     [getCachedCanvasBounds]
   );
 
+  // Function to sample textures from simulation (called on interval when mouse is down)
+  const sampleTextures = useCallback(async () => {
+    if (
+      !audioInitialized.current ||
+      !smokeSimulation.current ||
+      !isPlayingRef.current
+    ) {
+      return;
+    }
+
+    try {
+      // Sample textures from simulation and store for use
+      const textureData = await smokeSimulation.current.sampleTextures(4); // Downsample for performance
+      sampledTextureData.current = textureData;
+    } catch (error) {
+      console.warn("Failed to sample textures:", error);
+    }
+  }, []);
+
+  // Function to play note based on mouse position (called on every mousemove)
+  const playNoteAtPosition = useCallback(
+    async (clientX: number, clientY: number) => {
+      if (
+        !audioInitialized.current ||
+        !sampledTextureData.current ||
+        !isPlayingRef.current
+      ) {
+        return;
+      }
+
+      try {
+        // Get normalized coordinates from current mouse position
+        const rect = getCachedCanvasBounds();
+        if (!rect) return;
+
+        const normalizedX = (clientX - rect.left) / rect.width;
+        // Flip Y coordinate so top = low pitch, bottom = high pitch
+        const normalizedY = 1.0 - (clientY - rect.top) / rect.height;
+
+        // Ensure coordinates are in valid range
+        if (
+          normalizedX < 0 ||
+          normalizedX > 1 ||
+          normalizedY < 0 ||
+          normalizedY > 1
+        ) {
+          return;
+        }
+
+        // Sample density at normalized coordinates
+        const density = sampledTextureData.current.smokeDensity.getAtNormalized(
+          normalizedX,
+          normalizedY
+        );
+
+        // Map normalized Y to pentatonic scale (0 = lowest pitch, 1 = highest pitch now)
+        const scaleIndex = Math.floor(
+          normalizedY * (PENTATONIC_SCALE.length - 1)
+        );
+        const pitch = PENTATONIC_SCALE[scaleIndex];
+
+        // Map density to velocity (0-1 range, with minimum threshold for audibility)
+        const velocity = Math.max(
+          0.5,
+          Math.min(1.0, density * 2)
+        ) as NoteVelocity;
+
+        // Create note and play it
+        const note: Note = {
+          pitch: pitch,
+          velocity: velocity,
+        };
+
+        // Only play if the note is different from the previous one
+        if (!areNotesEqual(lastPlayedNote.current, note)) {
+          await audioEngine.current?.playNote(note);
+          lastPlayedNote.current = note;
+        }
+      } catch (error) {
+        console.warn("Failed to play note:", error);
+      }
+    },
+    [getCachedCanvasBounds, areNotesEqual]
+  );
+
   // Batched mouse event handler
   const handleBatchedMouseEvents = useCallback(
     (events: MouseEventData[]) => {
@@ -150,53 +280,132 @@ function SmokeSimulationComponent() {
           smokeSimulation.current.addSmoke(coords.x, coords.y);
           previousMousePos.current = coords;
           lastInteractionTime.current = event.timestamp;
-        } else if (event.type === "mousemove" && isMouseDownRef.current) {
-          smokeSimulation.current.addSmoke(coords.x, coords.y);
 
-          if (previousMousePos.current) {
-            const deltaTime =
-              (event.timestamp - lastInteractionTime.current) / 1000;
+          // Start texture sampling interval when mouse is pressed
+          if (!samplingIntervalRef.current) {
+            sampleTextures(); // Sample immediately
+            samplingIntervalRef.current = window.setInterval(
+              sampleTextures,
+              AUDIO_SAMPLE_INTERVAL_MS
+            );
+          }
 
-            if (deltaTime > 0) {
-              const rawVelocityX =
-                (coords.x - previousMousePos.current.x) / deltaTime;
-              const rawVelocityY =
-                (coords.y - previousMousePos.current.y) / deltaTime;
+          // Play initial note on click
+          playNoteAtPosition(event.clientX, event.clientY);
+        } else if (event.type === "mousemove") {
+          // Always track mouse position
+          currentMousePos.current = { x: event.clientX, y: event.clientY };
 
-              const velocityScale = 0.02;
-              const maxVelocity = 10;
+          if (isMouseDownRef.current) {
+            smokeSimulation.current.addSmoke(coords.x, coords.y);
 
-              let velocityX = rawVelocityX * velocityScale;
-              let velocityY = rawVelocityY * velocityScale;
+            // Play note on every mousemove when dragging
+            playNoteAtPosition(event.clientX, event.clientY);
 
-              const velocityMagnitude = Math.sqrt(
-                velocityX * velocityX + velocityY * velocityY
-              );
-              if (velocityMagnitude > maxVelocity) {
-                const scale = maxVelocity / velocityMagnitude;
-                velocityX *= scale;
-                velocityY *= scale;
+            if (previousMousePos.current) {
+              const deltaTime =
+                (event.timestamp - lastInteractionTime.current) / 1000;
+
+              if (deltaTime > 0) {
+                const rawVelocityX =
+                  (coords.x - previousMousePos.current.x) / deltaTime;
+                const rawVelocityY =
+                  (coords.y - previousMousePos.current.y) / deltaTime;
+
+                const velocityScale = 0.02;
+                const maxVelocity = 10;
+
+                let velocityX = rawVelocityX * velocityScale;
+                let velocityY = rawVelocityY * velocityScale;
+
+                const velocityMagnitude = Math.sqrt(
+                  velocityX * velocityX + velocityY * velocityY
+                );
+                if (velocityMagnitude > maxVelocity) {
+                  const scale = maxVelocity / velocityMagnitude;
+                  velocityX *= scale;
+                  velocityY *= scale;
+                }
+
+                smokeSimulation.current.addVelocity(
+                  coords.x,
+                  coords.y,
+                  velocityX,
+                  velocityY
+                );
               }
 
-              smokeSimulation.current.addVelocity(
-                coords.x,
-                coords.y,
-                velocityX,
-                velocityY
-              );
+              previousMousePos.current = coords;
+              lastInteractionTime.current = event.timestamp;
             }
-
-            previousMousePos.current = coords;
-            lastInteractionTime.current = event.timestamp;
           }
         } else if (event.type === "mouseup") {
           isMouseDownRef.current = false;
           previousMousePos.current = null;
+          // Reset last played note so clicking the same spot again will play the note
+          lastPlayedNote.current = null;
+          // Stop texture sampling interval when mouse is released
+          if (samplingIntervalRef.current) {
+            clearInterval(samplingIntervalRef.current);
+            samplingIntervalRef.current = null;
+          }
         }
       }
     },
-    [isInitialized, canvasToGridCoords]
+    [isInitialized, canvasToGridCoords, sampleTextures, playNoteAtPosition]
   );
+
+  // Initialize audio engine on user gesture
+  useEffect(() => {
+    if (audioInitialized.current || !canvasRef.current) return;
+
+    const handleUserGesture = async () => {
+      if (!audioEngine.current) {
+        try {
+          audioEngine.current = new AudioEngine();
+          await audioEngine.current.initialize();
+          audioInitialized.current = true;
+
+          console.log("Audio engine initialized successfully");
+        } catch (error) {
+          console.warn("Failed to initialize audio engine:", error);
+        }
+      }
+
+      // Remove listeners immediately after initialization
+      const canvas = canvasRef.current;
+      if (canvas) {
+        canvas.removeEventListener("click", handleUserGesture);
+        canvas.removeEventListener("mousedown", handleUserGesture);
+        canvas.removeEventListener("keydown", handleUserGesture);
+        document.removeEventListener("keydown", handleUserGesture);
+      }
+    };
+
+    // Add multiple user gesture listeners to ensure we catch user interaction
+    const canvas = canvasRef.current;
+    if (canvas) {
+      canvas.addEventListener("click", handleUserGesture, { once: true });
+      canvas.addEventListener("mousedown", handleUserGesture, { once: true });
+      canvas.addEventListener("keydown", handleUserGesture, { once: true });
+      document.addEventListener("keydown", handleUserGesture, { once: true });
+    }
+
+    // Cleanup if component unmounts before initialization
+    return () => {
+      if (canvas) {
+        canvas.removeEventListener("click", handleUserGesture);
+        canvas.removeEventListener("mousedown", handleUserGesture);
+        canvas.removeEventListener("keydown", handleUserGesture);
+        document.removeEventListener("keydown", handleUserGesture);
+      }
+    };
+  }, [sampleTextures]);
+
+  // Keep isPlayingRef in sync with isPlaying state
+  useEffect(() => {
+    isPlayingRef.current = isPlaying;
+  }, [isPlaying]);
 
   // Initialize RAF event processor and native event listeners to bypass React overhead
   useEffect(() => {
@@ -236,6 +445,13 @@ function SmokeSimulationComponent() {
     const handleNativeMouseLeave = () => {
       isMouseDownRef.current = false;
       previousMousePos.current = null;
+      // Reset last played note when mouse leaves canvas
+      lastPlayedNote.current = null;
+      // Stop texture sampling interval when mouse leaves canvas
+      if (samplingIntervalRef.current) {
+        clearInterval(samplingIntervalRef.current);
+        samplingIntervalRef.current = null;
+      }
     };
 
     // Add native event listeners with passive option for better performance
@@ -280,6 +496,14 @@ function SmokeSimulationComponent() {
       if (smokeSimulation.current) {
         smokeSimulation.current.destroy();
         smokeSimulation.current = null;
+      }
+      // Cleanup audio engine and sampling interval
+      if (samplingIntervalRef.current) {
+        clearInterval(samplingIntervalRef.current);
+        samplingIntervalRef.current = null;
+      }
+      if (audioEngine.current) {
+        audioEngine.current = null;
       }
       setIsInitialized(false);
     };

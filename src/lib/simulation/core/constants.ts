@@ -1,5 +1,7 @@
 import type { SimulationConstants } from "./types";
 
+export const FLOAT_BYTES = 4;
+
 // Default simulation constants
 export const SIMULATION_CONSTANTS: SimulationConstants = {
   grid: {
