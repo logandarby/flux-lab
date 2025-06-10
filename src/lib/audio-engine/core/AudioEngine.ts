@@ -50,7 +50,14 @@ export class AudioEngine {
   }
 
   private createSynth(): typeof this.synth {
-    const synth = new Tone.PolySynth();
+    const synth = new Tone.PolySynth(Tone.Synth, {
+      envelope: {
+        attack: 0.8,
+        decay: 0,
+        sustain: 1,
+        release: 1.2,
+      },
+    });
     synth.maxPolyphony = 100;
     const reverb = new Tone.Reverb({
       decay: 2,
