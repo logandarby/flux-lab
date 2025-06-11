@@ -599,6 +599,10 @@ class SmokeSimulation implements ISmokeSimulation {
     return this.performanceTracker.getMetrics();
   }
 
+  public getGridSize() {
+    return SIMULATION_CONSTANTS.grid.size;
+  }
+
   public async sampleTextures(
     downSample: number = 1
   ): Promise<SmokeTextureExports> {
@@ -687,25 +691,28 @@ class SmokeSimulation implements ISmokeSimulation {
       velocityData.push([velocityRawData[i], velocityRawData[i + 1]]);
     }
 
-    // Create Array2D structures with proper dimensions
+    // Create Array2D structures with proper dimensions and flipped Y coordinates
     const result: SmokeTextureExports = {
       smokeDensity: createScalarField2D(
         new Float32Array(smokeDensityData),
         gridSize.width,
         gridSize.height,
-        downSample
+        downSample,
+        true
       ),
       velocity: createVectorField2D(
         velocityData,
         gridSize.width,
         gridSize.height,
-        downSample
+        downSample,
+        true
       ),
       pressure: createScalarField2D(
         new Float32Array(pressureData),
         gridSize.width,
         gridSize.height,
-        downSample
+        downSample,
+        true
       ),
     };
 

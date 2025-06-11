@@ -19,7 +19,12 @@ export class Array2D<T> {
   /**
    * Create Array2D from a flat array
    */
-  static fromArray<T>(data: T[], width: number, height: number): Array2D<T> {
+  static fromArray<T>(
+    data: T[],
+    width: number,
+    height: number,
+    flipY: boolean = false
+  ): Array2D<T> {
     if (data.length !== width * height) {
       throw new Error(
         `Data length ${data.length} does not match dimensions ${width}x${height}`
@@ -27,7 +32,23 @@ export class Array2D<T> {
     }
 
     const array2D = new Array2D<T>(width, height);
-    array2D.data = [...data];
+
+    if (flipY) {
+      // Flip Y coordinates by reordering rows
+      const flippedData = new Array<T>(data.length);
+      for (let y = 0; y < height; y++) {
+        const sourceRow = height - 1 - y; // Flip Y
+        for (let x = 0; x < width; x++) {
+          const sourceIndex = sourceRow * width + x;
+          const destIndex = y * width + x;
+          flippedData[destIndex] = data[sourceIndex];
+        }
+      }
+      array2D.data = flippedData;
+    } else {
+      array2D.data = [...data];
+    }
+
     return array2D;
   }
 
@@ -169,7 +190,8 @@ export function createScalarField2D(
   data: Float32Array,
   originalWidth: number,
   originalHeight: number,
-  downSample: number = 1
+  downSample: number = 1,
+  flipY: boolean = false
 ): ScalarField2D {
   const sampledWidth = Math.floor(originalWidth / downSample);
   const sampledHeight = Math.floor(originalHeight / downSample);
@@ -180,14 +202,20 @@ export function createScalarField2D(
     );
   }
 
-  return Array2D.fromArray(Array.from(data), sampledWidth, sampledHeight);
+  return Array2D.fromArray(
+    Array.from(data),
+    sampledWidth,
+    sampledHeight,
+    flipY
+  );
 }
 
 export function createVectorField2D(
   data: Array<[number, number]>,
   originalWidth: number,
   originalHeight: number,
-  downSample: number = 1
+  downSample: number = 1,
+  flipY: boolean = false
 ): VectorField2D {
   const sampledWidth = Math.floor(originalWidth / downSample);
   const sampledHeight = Math.floor(originalHeight / downSample);
@@ -198,5 +226,5 @@ export function createVectorField2D(
     );
   }
 
-  return Array2D.fromArray(data, sampledWidth, sampledHeight);
+  return Array2D.fromArray(data, sampledWidth, sampledHeight, flipY);
 }

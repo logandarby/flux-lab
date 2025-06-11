@@ -3,7 +3,6 @@ export * from "./core/SimulationPasses";
 export * from "./core/constants";
 
 // Component exports
-export { default as SmokeSimulationComponent } from "./core/SmokeSimulationComponent";
 export { default as SimulationControls } from "./components/SimulationControls";
 
 // Test component exports (for development)

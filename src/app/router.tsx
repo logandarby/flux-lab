@@ -4,9 +4,9 @@ import {
   createRootRoute,
   Outlet,
 } from "@tanstack/react-router";
-import SmokeSimulationComponent from "../lib/simulation/core/SmokeSimulationComponent";
 import TestsPage from "../app/TestsPage";
 import { TestComponent } from "./TestComponent";
+import SmokeSimulationComponent from "./component/SmokeSimulationComponent";
 
 // Root route
 const rootRoute = createRootRoute({
