@@ -498,7 +498,7 @@ function SmokeSimulationComponent() {
               style={{ fontFamily: "Baskervville, serif" }}
             >
               <img
-                src="/Astroid_filled.svg"
+                src="/flux-lab/Astroid_filled.svg"
                 alt="FluxLab Icon"
                 className="w-9 h-9 brightness-0 invert"
               />

@@ -37,8 +37,11 @@ const testRoute = createRoute({
 // Create the route tree
 const routeTree = rootRoute.addChildren([indexRoute, testsRoute, testRoute]);
 
-// Create the router
-export const router = createRouter({ routeTree });
+// Create the router with base path
+export const router = createRouter({
+  routeTree,
+  basepath: "/flux-lab",
+});
 
 // Register router for typesafety
 declare module "@tanstack/react-router" {
