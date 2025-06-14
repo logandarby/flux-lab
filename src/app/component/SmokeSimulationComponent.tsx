@@ -494,9 +494,14 @@ function SmokeSimulationComponent() {
         >
           <DialogHeader className="text-center space-y-6">
             <DialogTitle
-              className="text-center text-4xl font-normal tracking-wide text-neutral-100"
+              className="text-center text-4xl font-normal tracking-wide text-neutral-100 flex items-center justify-center gap-3"
               style={{ fontFamily: "Baskervville, serif" }}
             >
+              <img
+                src="/Astroid_filled.svg"
+                alt="FluxLab Icon"
+                className="w-9 h-9 brightness-0 invert"
+              />
               FluxLab
             </DialogTitle>
             <div className="space-y-4">
