@@ -30,7 +30,7 @@ export const SIMULATION_CONSTANTS: SimulationConstants = {
 
   interaction: {
     radius: 20, // Radius of effect when adding smoke/velocity
-    smokeIntensity: 0.2, // Intensity of smoke when clicking
+    smokeIntensity: 0.18, // Intensity of smoke when clicking
     velocityIntensity: 2.0, // Intensity multiplier for velocity when dragging
   },
 
@@ -41,5 +41,10 @@ export const SIMULATION_CONSTANTS: SimulationConstants = {
 
   particles: {
     smokeDimensions: { width: 2 ** 7, height: 2 ** 7 },
+  },
+
+  noise: {
+    stddev: 0.06,
+    mean: 0.0,
   },
 };

@@ -105,4 +105,10 @@ export interface SimulationConstants {
   particles: {
     smokeDimensions: { width: number; height: number };
   };
+
+  // Noise configuration
+  noise: {
+    stddev: number;
+    mean: number;
+  };
 }

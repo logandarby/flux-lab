@@ -117,6 +117,10 @@ function mergeSimulationConstants(
       ...defaults.particles,
       ...overrides.particles,
     },
+    noise: {
+      ...defaults.noise,
+      ...overrides.noise,
+    },
   };
 }
 
@@ -419,8 +423,8 @@ class SmokeSimulation implements ISmokeSimulation {
     this.renderingPass.writeToUniformBuffer({
       shaderMode,
       noise: {
-        mean: 0,
-        stddev: 0.05,
+        mean: this.config.noise.mean,
+        stddev: this.config.noise.stddev,
         offsets: [Math.random(), Math.random(), Math.random()],
       },
       smokeColor: this.smokeColor,
