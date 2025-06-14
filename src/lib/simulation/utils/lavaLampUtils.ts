@@ -25,6 +25,7 @@ export interface LavaLampDependencies {
   canvasBounds: DOMRect;
   isLavaLampMode: boolean;
   intervalTracker: Set<number>;
+  isWindowFocused: boolean;
 }
 
 /**
@@ -44,8 +45,13 @@ export function createSubPill(
     gridSize,
   } = config;
 
-  const { simulation, canvasBounds, isLavaLampMode, intervalTracker } =
-    dependencies;
+  const {
+    simulation,
+    canvasBounds,
+    isLavaLampMode,
+    intervalTracker,
+    isWindowFocused,
+  } = dependencies;
 
   // Apply position variation
   const x =
@@ -73,7 +79,7 @@ export function createSubPill(
   let pillStarted = false;
 
   const pillIntervalId = setInterval(() => {
-    if (!simulation || !isLavaLampMode) {
+    if (!simulation || !isLavaLampMode || !isWindowFocused) {
       // Cleanup: send mouse up event if pill was active
       if (pillStarted) {
         const currentX =
@@ -330,9 +336,9 @@ export function scheduleLavaLampPill(
   dependencies: LavaLampDependencies,
   scheduleNext: () => void
 ): void {
-  const { isLavaLampMode, intervalTracker } = dependencies;
+  const { isLavaLampMode, intervalTracker, isWindowFocused } = dependencies;
 
-  if (!isLavaLampMode) return;
+  if (!isLavaLampMode || !isWindowFocused) return;
 
   const lavaLampConfig = SIMULATION_CONSTANTS.lavaLamp;
 
@@ -343,11 +349,16 @@ export function scheduleLavaLampPill(
     lavaLampConfig.spawnInterval.min;
 
   const timeoutId = setTimeout(() => {
-    createLavaLampPill(dependencies);
-    intervalTracker.delete(timeoutId);
-
-    // Schedule the next pill
-    scheduleNext();
+    // Check if window is still focused when timeout executes
+    if (dependencies.isWindowFocused && dependencies.isLavaLampMode) {
+      createLavaLampPill(dependencies);
+      intervalTracker.delete(timeoutId);
+      // Schedule the next pill
+      scheduleNext();
+    } else {
+      // Clean up if conditions are no longer met
+      intervalTracker.delete(timeoutId);
+    }
   }, nextPillDelay);
 
   intervalTracker.add(timeoutId);

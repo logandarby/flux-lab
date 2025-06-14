@@ -50,6 +50,9 @@ function SmokeSimulationComponent() {
   const [lavaLampMode, setLavaLampMode] = useState(false);
   const lavaLampIntervalsRef = useRef<Set<number>>(new Set());
 
+  // Window focus state for pausing/resuming lava lamp
+  const [isWindowFocused, setIsWindowFocused] = useState(true);
+
   // Canvas dimensions state for viewport sizing
   const [canvasDimensions, setCanvasDimensions] = useState({
     width: typeof window !== "undefined" ? window.innerWidth : 800,
@@ -158,6 +161,20 @@ function SmokeSimulationComponent() {
     return () => window.removeEventListener("resize", handleResize);
   }, []);
 
+  // Handle window focus/blur for pausing/resuming lava lamp
+  useEffect(() => {
+    const handleFocus = () => setIsWindowFocused(true);
+    const handleBlur = () => setIsWindowFocused(false);
+
+    window.addEventListener("focus", handleFocus);
+    window.addEventListener("blur", handleBlur);
+
+    return () => {
+      window.removeEventListener("focus", handleFocus);
+      window.removeEventListener("blur", handleBlur);
+    };
+  }, []);
+
   // Get lava lamp dependencies for utility functions
   const getLavaLampDependencies =
     useCallback((): LavaLampDependencies | null => {
@@ -171,8 +188,9 @@ function SmokeSimulationComponent() {
         canvasBounds,
         isLavaLampMode: lavaLampMode,
         intervalTracker: lavaLampIntervalsRef.current,
+        isWindowFocused: isWindowFocused,
       };
-    }, [audioVisualization, lavaLampMode]);
+    }, [audioVisualization, lavaLampMode, isWindowFocused]);
 
   // Wrapper for scheduling lava lamp pills
   const scheduleLavaLampPill = useCallback(() => {
@@ -372,6 +390,16 @@ function SmokeSimulationComponent() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [lavaLampMode, isInitialized]);
+
+  // Resume lava lamp when window regains focus
+  useEffect(() => {
+    if (lavaLampMode && isInitialized && isWindowFocused) {
+      // Clear any existing scheduling first
+      clearLavaLampIntervals(lavaLampIntervalsRef.current);
+      scheduleLavaLampPill();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isWindowFocused]);
 
   // Cleanup effect - destroy simulation when component unmounts
   useEffect(() => {
