@@ -121,6 +121,10 @@ function mergeSimulationConstants(
       ...defaults.noise,
       ...overrides.noise,
     },
+    lavaLamp: {
+      ...defaults.lavaLamp,
+      ...overrides.lavaLamp,
+    },
   };
 }
 

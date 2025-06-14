@@ -44,7 +44,26 @@ export const SIMULATION_CONSTANTS: SimulationConstants = {
   },
 
   noise: {
-    stddev: 0.06,
+    stddev: 0.08,
     mean: 0.0,
+  },
+
+  lavaLamp: {
+    spawnAreaHeightPercent: 0.1,
+    velocityRange: {
+      horizontal: { min: -2, max: 2 },
+      vertical: { min: 1, max: 8 },
+    },
+    pillDuration: { min: 500, max: 3000 },
+    pillInterval: 50,
+    spawnInterval: { min: 1000, max: 3000 },
+    velocityScale: 40,
+
+    subPills: {
+      count: { min: 4, max: 8 },
+      spawnDelay: { min: 50, max: 100 },
+      velocityVariation: 1.1,
+      positionVariation: 30,
+    },
   },
 };

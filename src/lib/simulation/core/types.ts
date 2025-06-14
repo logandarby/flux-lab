@@ -111,4 +111,25 @@ export interface SimulationConstants {
     stddev: number;
     mean: number;
   };
+
+  // Lava lamp mode configuration
+  lavaLamp: {
+    spawnAreaHeightPercent: number; // Percentage of screen height from top where pills spawn
+    velocityRange: {
+      horizontal: { min: number; max: number }; // Horizontal velocity range
+      vertical: { min: number; max: number }; // Vertical velocity range (positive = downward)
+    };
+    pillDuration: { min: number; max: number }; // Duration each pill lasts (ms)
+    pillInterval: number; // How often smoke/velocity is added during pill (ms)
+    spawnInterval: { min: number; max: number }; // Time between new pills (ms)
+    velocityScale: number; // Scale factor for pill movement
+
+    // Sub-pill trail configuration
+    subPills: {
+      count: { min: number; max: number }; // Number of sub-pills per main pill
+      spawnDelay: { min: number; max: number }; // Delay between sub-pill spawns (ms)
+      velocityVariation: number; // Percentage of main velocity variation (0.0 to 1.0)
+      positionVariation: number; // Pixel variation in spawn position
+    };
+  };
 }

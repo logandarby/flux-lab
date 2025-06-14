@@ -10,6 +10,14 @@ import type { EventPerformanceMetrics } from "@/lib/performance";
 import { type SmokeTextureID } from "@/lib/simulation/core/types";
 import type { MouseEventData } from "@/lib/performance/types/eventMetrics";
 import { useAudioVisualization } from "@/lib/audio-visualization";
+import { usePersistedState } from "@/shared/utils/localStorage.utils";
+import {
+  CanvasCoordinateConverter,
+  isMouseNearBottom,
+  clearLavaLampIntervals,
+  scheduleLavaLampPill as scheduleLavaLampPillUtil,
+  type LavaLampDependencies,
+} from "@/lib/simulation/utils";
 import {
   Dialog,
   DialogContent,
@@ -32,8 +40,15 @@ function SmokeSimulationComponent() {
   const [showWelcomeModal, setShowWelcomeModal] = useState(true);
 
   // Color picker state
-  const [selectedColorIndex, setSelectedColorIndex] = useState(0);
+  const [selectedColorIndex, setSelectedColorIndex] = usePersistedState(
+    "fluxlab-color-index",
+    0
+  );
   const [showColorPicker, setShowColorPicker] = useState(false);
+
+  // Lava lamp mode state
+  const [lavaLampMode, setLavaLampMode] = useState(false);
+  const lavaLampIntervalsRef = useRef<Set<number>>(new Set());
 
   // Canvas dimensions state for viewport sizing
   const [canvasDimensions, setCanvasDimensions] = useState({
@@ -61,9 +76,8 @@ function SmokeSimulationComponent() {
   const previousMousePos = useRef<{ x: number; y: number } | null>(null);
   const lastInteractionTime = useRef<number>(0);
 
-  // Cache canvas bounds to avoid frequent getBoundingClientRect calls
-  const canvasBoundsRef = useRef<DOMRect | null>(null);
-  const canvasBoundsUpdateTimeRef = useRef<number>(0);
+  // Canvas coordinate converter for efficient coordinate transformations
+  const coordinateConverter = useRef(new CanvasCoordinateConverter());
 
   // Performance tracking
   const mouseMoveTracker = useRef(new FunctionCallTracker("Mouse Move Events"));
@@ -88,18 +102,24 @@ function SmokeSimulationComponent() {
     if (smokeSimulation.current) {
       smokeSimulation.current.setSmokeColor(COLOR_PRESETS[colorIndex].color);
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Handle lava lamp mode toggle
+  const handleLavaLampModeChange = useCallback((enabled: boolean) => {
+    setLavaLampMode(enabled);
+
+    // Clear existing intervals when disabling
+    if (!enabled) {
+      clearLavaLampIntervals(lavaLampIntervalsRef.current);
+    }
   }, []);
 
   // Show color picker on mouse movement
   const handleMouseActivity = useCallback(
     (clientY: number) => {
-      if (!showWelcomeModal) {
-        const threshold = 150; // Show color picker when within 150px of bottom
-        const distanceFromBottom = window.innerHeight - clientY;
-
-        if (distanceFromBottom <= threshold) {
-          setShowColorPicker(true);
-        }
+      if (!showWelcomeModal && isMouseNearBottom(clientY)) {
+        setShowColorPicker(true);
       }
     },
     [showWelcomeModal]
@@ -131,50 +151,36 @@ function SmokeSimulationComponent() {
         height: window.innerHeight,
       });
       // Clear cached canvas bounds when resizing
-      canvasBoundsRef.current = null;
+      coordinateConverter.current.clearCache();
     };
 
     window.addEventListener("resize", handleResize);
     return () => window.removeEventListener("resize", handleResize);
   }, []);
 
-  // Helper function to get cached canvas bounds
-  const getCachedCanvasBounds = useCallback(() => {
-    const now = performance.now();
-    if (
-      !canvasBoundsRef.current ||
-      now - canvasBoundsUpdateTimeRef.current > 100
-    ) {
-      if (canvasRef.current) {
-        canvasBoundsRef.current = canvasRef.current.getBoundingClientRect();
-        canvasBoundsUpdateTimeRef.current = now;
-      }
-    }
-    return canvasBoundsRef.current;
-  }, []);
+  // Get lava lamp dependencies for utility functions
+  const getLavaLampDependencies =
+    useCallback((): LavaLampDependencies | null => {
+      if (!smokeSimulation.current || !canvasRef.current) return null;
 
-  // Helper function to convert canvas coordinates to grid coordinates
-  const canvasToGridCoords = useCallback(
-    (clientX: number, clientY: number) => {
-      const rect = getCachedCanvasBounds();
-      if (!rect) return null;
+      const canvasBounds = canvasRef.current.getBoundingClientRect();
 
-      const canvasX = clientX - rect.left;
-      const canvasY = clientY - rect.top;
+      return {
+        simulation: smokeSimulation.current,
+        audioVisualization,
+        canvasBounds,
+        isLavaLampMode: lavaLampMode,
+        intervalTracker: lavaLampIntervalsRef.current,
+      };
+    }, [audioVisualization, lavaLampMode]);
 
-      // Get the actual grid size from the simulation
-      const gridSize = smokeSimulation.current?.getGridSize();
-      if (!gridSize) return null;
+  // Wrapper for scheduling lava lamp pills
+  const scheduleLavaLampPill = useCallback(() => {
+    const dependencies = getLavaLampDependencies();
+    if (!dependencies) return;
 
-      // Scale to grid coordinates
-      const gridX = (canvasX / rect.width) * gridSize.width;
-      // Note: Y coordinate should NOT be flipped since both canvas and WebGPU use top-left origin
-      const gridY = (canvasY / rect.height) * gridSize.height;
-
-      return { x: gridX, y: gridY };
-    },
-    [getCachedCanvasBounds]
-  );
+    scheduleLavaLampPillUtil(dependencies, scheduleLavaLampPill);
+  }, [getLavaLampDependencies]);
 
   // Batched mouse event handler
   const handleBatchedMouseEvents = useCallback(
@@ -187,7 +193,10 @@ function SmokeSimulationComponent() {
 
       // Process the batch of events
       for (const event of events) {
-        const coords = canvasToGridCoords(event.clientX, event.clientY);
+        const coords = coordinateConverter.current.clientToGrid(
+          event.clientX,
+          event.clientY
+        );
         if (!coords) continue;
 
         if (event.type === "mousedown") {
@@ -254,10 +263,10 @@ function SmokeSimulationComponent() {
         }
       }
     },
-    [isInitialized, canvasToGridCoords, audioVisualization, handleMouseActivity]
+    [isInitialized, audioVisualization, handleMouseActivity]
   );
 
-  // Initialize audio visualization when simulation is ready
+  // Initialize audio visualization and coordinate converter when simulation is ready
   useEffect(() => {
     if (
       isInitialized &&
@@ -266,6 +275,10 @@ function SmokeSimulationComponent() {
       !audioInitializedRef.current
     ) {
       audioVisualization.initialize(canvasRef.current, smokeSimulation.current);
+      coordinateConverter.current.initialize(
+        canvasRef.current,
+        smokeSimulation.current
+      );
       audioInitializedRef.current = true;
     }
   }, [isInitialized, audioVisualization]);
@@ -348,10 +361,27 @@ function SmokeSimulationComponent() {
     return () => clearInterval(interval);
   }, []);
 
+  // Lava lamp mode effect
+  useEffect(() => {
+    if (lavaLampMode && isInitialized) {
+      // Clear any existing scheduling first
+      clearLavaLampIntervals(lavaLampIntervalsRef.current);
+
+      // Start new scheduling
+      scheduleLavaLampPill();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [lavaLampMode, isInitialized]);
+
   // Cleanup effect - destroy simulation when component unmounts
   useEffect(() => {
     return () => {
       console.log("Component cleanup - destroying simulation");
+
+      // Clear all lava lamp intervals
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+      clearLavaLampIntervals(lavaLampIntervalsRef.current);
+
       if (smokeSimulation.current) {
         smokeSimulation.current.destroy();
         smokeSimulation.current = null;
@@ -470,12 +500,19 @@ function SmokeSimulationComponent() {
               FluxLab
             </DialogTitle>
             <div className="space-y-4">
+              <DialogDescription
+                className="text-neutral-400 text-base font-light tracking-wide text-center"
+                style={{ fontFamily: "Baskervville, serif" }}
+              >
+                Music from movement.
+              </DialogDescription>
               <div className="w-16 h-px bg-neutral-600 mx-auto"></div>
               <DialogDescription
                 className="text-neutral-400 text-base font-light tracking-wide text-center"
                 style={{ fontFamily: "Baskervville, serif" }}
               >
-                Click and drag to create music
+                Click and drag to synthesize. Seek the spectrum in the depths
+                below.
               </DialogDescription>
             </div>
           </DialogHeader>
@@ -516,6 +553,8 @@ function SmokeSimulationComponent() {
           onColorSelect={handleColorSelect}
           isVisible={showColorPicker}
           onVisibilityChange={setShowColorPicker}
+          lavaLampMode={lavaLampMode}
+          onLavaLampModeChange={handleLavaLampModeChange}
         />
 
         {initError && (

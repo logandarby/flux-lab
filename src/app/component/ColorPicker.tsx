@@ -1,5 +1,6 @@
 import { useCallback, useRef, useEffect } from "react";
 import { COLOR_PRESETS } from "../core/app.constants";
+import { Checkbox } from "@/shared/ui/checkbox";
 
 interface ColorPickerProps {
   selectedColorIndex: number;
@@ -7,6 +8,8 @@ interface ColorPickerProps {
   isVisible: boolean;
   onVisibilityChange: (visible: boolean) => void;
   autoHideDelay?: number;
+  lavaLampMode: boolean;
+  onLavaLampModeChange: (enabled: boolean) => void;
 }
 
 export function ColorPicker({
@@ -15,6 +18,8 @@ export function ColorPicker({
   isVisible,
   onVisibilityChange,
   autoHideDelay = 3000,
+  lavaLampMode,
+  onLavaLampModeChange,
 }: ColorPickerProps) {
   const timeoutRef = useRef<number | null>(null);
 
@@ -41,6 +46,12 @@ export function ColorPicker({
     },
     [onColorSelect, showTemporarily]
   );
+
+  // Handle lava lamp mode toggle
+  const handleLavaLampToggle = useCallback(() => {
+    onLavaLampModeChange(!lavaLampMode);
+    showTemporarily();
+  }, [lavaLampMode, onLavaLampModeChange, showTemporarily]);
 
   // Cleanup timeout on unmount
   useEffect(() => {
@@ -69,22 +80,42 @@ export function ColorPicker({
       }`}
     >
       <div className="bg-black/80 backdrop-blur-md border border-neutral-700 rounded-2xl px-6 py-4 shadow-2xl">
-        <div className="grid grid-cols-8 gap-3">
-          {COLOR_PRESETS.map((preset, index) => (
-            <button
-              key={preset.name}
-              onClick={() => handleColorSelect(index)}
-              className={`w-10 h-10 rounded-full border-2 transition-all duration-200 hover:scale-110 focus:outline-none focus:ring-2 focus:ring-white/50 ${
-                selectedColorIndex === index
-                  ? "border-white shadow-lg shadow-white/20"
-                  : "border-neutral-600 hover:border-neutral-400"
-              }`}
-              style={{
-                backgroundColor: `rgb(${preset.color.map((c) => Math.floor(c * 255)).join(", ")})`,
-              }}
-              title={preset.name}
-            />
-          ))}
+        <div className="space-y-4">
+          {/* Color Presets */}
+          <div className="grid grid-cols-8 gap-3">
+            {COLOR_PRESETS.map((preset, index) => (
+              <button
+                key={preset.name}
+                onClick={() => handleColorSelect(index)}
+                className={`w-10 h-10 rounded-full border-2 transition-all duration-200 hover:scale-110 focus:outline-none focus:ring-2 focus:ring-white/50 ${
+                  selectedColorIndex === index
+                    ? "border-white shadow-lg shadow-white/20"
+                    : "border-neutral-600 hover:border-neutral-400"
+                }`}
+                style={{
+                  backgroundColor: `rgb(${preset.color.map((c) => Math.floor(c * 255)).join(", ")})`,
+                }}
+                title={preset.name}
+              />
+            ))}
+          </div>
+
+          {/* Lava Lamp Mode Toggle */}
+          <div className="flex items-center justify-center pt-2 border-t border-neutral-700">
+            <label className="flex items-center justify-center gap-2 cursor-pointer">
+              <Checkbox
+                checked={lavaLampMode}
+                onCheckedChange={handleLavaLampToggle}
+                className="border-neutral-600 hover:cursor-pointer"
+              />
+              <span
+                className={`text-sm font-medium transition-colors text-neutral-100 vertical-align-middle`}
+                style={{ fontFamily: "Baskervville, serif" }}
+              >
+                Lava Lamp
+              </span>
+            </label>
+          </div>
         </div>
       </div>
     </div>
