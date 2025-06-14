@@ -1,6 +1,14 @@
-import { AudioEngine, type Note, type NoteVelocity } from "../core/AudioEngine";
+import * as Tone from "tone";
 import type { SmokeTextureExports } from "@/lib/simulation/core/SmokeSimulation";
 import type { AudioPreset } from "../types";
+import { ToneUtils } from "../utils/ToneUtils";
+
+export type NoteVelocity = Tone.Unit.NormalRange;
+
+export interface Note {
+  pitch: Tone.Unit.Frequency;
+  velocity: NoteVelocity;
+}
 
 /**
  * Default pentatonic synthesis preset
@@ -25,14 +33,21 @@ export class PentatonicSynthPreset implements AudioPreset {
   ];
 
   private lastPlayedNote: Note | null = null;
+  private synth: Tone.PolySynth | null = null;
 
-  constructor(private audioEngine: AudioEngine) {}
+  constructor() {
+    this.initializeSynth();
+  }
 
   async onMouseDown(
     normalizedX: number,
     normalizedY: number,
     textureData: SmokeTextureExports | null
   ): Promise<void> {
+    // Ensure ToneJS is initialized
+    if (!ToneUtils.isInitialized()) {
+      await ToneUtils.initialize();
+    }
     await this.playNoteAtPosition(normalizedX, normalizedY, textureData);
   }
 
@@ -52,6 +67,45 @@ export class PentatonicSynthPreset implements AudioPreset {
     this.lastPlayedNote = null;
   }
 
+  private initializeSynth(): void {
+    const synth = new Tone.PolySynth(Tone.Synth, {
+      envelope: {
+        attack: 0.8,
+        decay: 0,
+        sustain: 1,
+        release: 1.2,
+      },
+    });
+    synth.maxPolyphony = 100;
+
+    const reverb = new Tone.Reverb({
+      decay: 2,
+      wet: 0.9,
+    });
+    const chorus = new Tone.Chorus(4, 2.5, 1);
+    const delay = new Tone.PingPongDelay("4n", 0.5).chain(new Tone.Gain(0.7));
+    const master = new Tone.Gain(1.0).toDestination();
+
+    synth.chain(chorus, reverb, master);
+    synth.chain(chorus, delay, reverb, master);
+
+    this.synth = synth;
+  }
+
+  private async playNote(note: Note): Promise<void> {
+    if (!this.synth) {
+      console.warn("Synth not initialized");
+      return;
+    }
+
+    this.synth.triggerAttackRelease(
+      note.pitch,
+      "32n",
+      undefined,
+      note.velocity
+    );
+  }
+
   private async playNoteAtPosition(
     normalizedX: number,
     normalizedY: number,
@@ -69,7 +123,6 @@ export class PentatonicSynthPreset implements AudioPreset {
       return;
     }
 
-    // Sample density at normalized coordinates (Y is already flipped in the texture data)
     const density = textureData.smokeDensity.getAtNormalized(
       normalizedX,
       normalizedY
@@ -90,7 +143,7 @@ export class PentatonicSynthPreset implements AudioPreset {
     // Only play if the note is different from the previous one
     if (!this.areNotesEqual(this.lastPlayedNote, note)) {
       // console.log("Playing note", note);
-      await this.audioEngine.playNote(note);
+      await this.playNote(note);
       this.lastPlayedNote = note;
     }
   }

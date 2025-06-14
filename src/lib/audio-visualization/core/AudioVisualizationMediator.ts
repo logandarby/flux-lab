@@ -1,4 +1,3 @@
-import { AudioEngine } from "./AudioEngine";
 import type SmokeSimulation from "@/lib/simulation/core/SmokeSimulation";
 import type { SmokeTextureExports } from "@/lib/simulation/core/SmokeSimulation";
 import type {
@@ -9,12 +8,12 @@ import type {
 import { AudioVisualizationError } from "../errors";
 import { PentatonicSynthPreset } from "../presets/PentatonicSynthPreset";
 import { DEFAULT_AUDIO_VISUALIZATION_CONFIG } from "../config";
+import { ToneUtils } from "../utils/ToneUtils";
 
 /**
  * Mediator class to handle audio-visual interactions between smoke simulation and audio engine
  */
 export class AudioVisualizationMediator {
-  private audioEngine: AudioEngine | null = null;
   private simulation: SmokeSimulation | null = null;
   private canvas: HTMLCanvasElement | null = null;
   private canvasBounds: DOMRect | null = null;
@@ -48,12 +47,11 @@ export class AudioVisualizationMediator {
     this.canvas = canvas;
     this.simulation = simulation;
 
-    // Initialize audio engine
-    this.audioEngine = new AudioEngine();
+    // Initialize ToneJS
+    await ToneUtils.initialize();
 
     // Set up audio preset (default to pentatonic if none provided)
-    this.audioPreset =
-      audioPreset ?? new PentatonicSynthPreset(this.audioEngine);
+    this.audioPreset = audioPreset ?? new PentatonicSynthPreset();
 
     // Set up user gesture listeners for audio initialization
     this.setupAudioInitialization();
@@ -89,9 +87,9 @@ export class AudioVisualizationMediator {
     if (!this.audioPreset) return;
 
     // Try to initialize audio if not already initialized
-    if (!this.audioInitialized && this.audioEngine) {
+    if (!this.audioInitialized) {
       try {
-        await this.audioEngine.initialize();
+        await ToneUtils.initialize();
         this.audioInitialized = true;
         console.log("Audio engine initialized successfully");
         this.removeAudioInitializationListeners();
@@ -174,7 +172,6 @@ export class AudioVisualizationMediator {
   destroy(): void {
     this.stopSampling();
     this.removeAudioInitializationListeners();
-    this.audioEngine = null;
     this.simulation = null;
     this.canvas = null;
     this.audioPreset = null;
@@ -263,10 +260,10 @@ export class AudioVisualizationMediator {
     }
 
     const handleUserGesture = async () => {
-      if (this.audioInitialized || !this.audioEngine) return;
+      if (this.audioInitialized) return;
 
       try {
-        await this.audioEngine.initialize();
+        await ToneUtils.initialize();
         this.audioInitialized = true;
         console.log("Audio engine initialized successfully");
         this.removeAudioInitializationListeners();
