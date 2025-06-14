@@ -312,6 +312,7 @@ class DiffusionTestSimulation {
         stddev: 0.05,
         offsets: [Math.random(), Math.random(), Math.random()],
       },
+      smokeColor: [0.0, 1.0, 0.0],
     });
     this.renderingPass.execute(
       renderPassEncoder,

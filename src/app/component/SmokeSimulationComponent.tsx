@@ -2,47 +2,25 @@ import { useCallback, useRef } from "react";
 import { useEffect, useState } from "react";
 import { ShaderMode } from "@/shared/webgpu/RenderPass";
 import SmokeSimulation from "@/lib/simulation/core/SmokeSimulation";
-import SimulationControls from "@/lib/simulation/components/SimulationControls";
-import { usePersistedState } from "@/shared/utils/localStorage.utils";
 import { PerformanceViewer } from "@/lib/performance";
 import type { PerformanceMetrics } from "@/lib/performance";
 import { usePerformanceToggle } from "@/lib/performance";
 import { FunctionCallTracker, RAFEventProcessor } from "@/lib/performance";
 import type { EventPerformanceMetrics } from "@/lib/performance";
-import { SIMULATION_CONSTANTS } from "@/lib/simulation/core/constants";
 import { type SmokeTextureID } from "@/lib/simulation/core/types";
 import type { MouseEventData } from "@/lib/performance/types/eventMetrics";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/shared/ui/select";
 import { useAudioVisualization } from "@/lib/audio-visualization";
-
-const CANVAS_SCALE = 2;
-const CANVAS_HEIGHT = SIMULATION_CONSTANTS.grid.size.height * CANVAS_SCALE;
-const CANVAS_WIDTH = SIMULATION_CONSTANTS.grid.size.width * CANVAS_SCALE;
-
-// Visualization mode options
-const VISUALIZATION_MODES = [
-  {
-    value: ShaderMode.DENSITY,
-    label: "Smoke Density",
-    texture: "smokeDensity" as SmokeTextureID,
-  },
-  {
-    value: ShaderMode.VELOCITY,
-    label: "Velocity Field",
-    texture: "velocity" as SmokeTextureID,
-  },
-  {
-    value: ShaderMode.PRESSURE,
-    label: "Pressure Field",
-    texture: "pressure" as SmokeTextureID,
-  },
-];
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+} from "@/shared/ui/dialog";
+import { Button } from "@/shared/ui/button";
+import { ColorPicker } from "./ColorPicker";
+import { COLOR_PRESETS } from "../core/app.constants";
 
 function SmokeSimulationComponent() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -51,6 +29,17 @@ function SmokeSimulationComponent() {
   const [isInitialized, setIsInitialized] = useState(false);
   const [isPlaying, setIsPlaying] = useState(true);
   const [initError, setInitError] = useState<string | null>(null);
+  const [showWelcomeModal, setShowWelcomeModal] = useState(true);
+
+  // Color picker state
+  const [selectedColorIndex, setSelectedColorIndex] = useState(0);
+  const [showColorPicker, setShowColorPicker] = useState(false);
+
+  // Canvas dimensions state for viewport sizing
+  const [canvasDimensions, setCanvasDimensions] = useState({
+    width: typeof window !== "undefined" ? window.innerWidth : 800,
+    height: typeof window !== "undefined" ? window.innerHeight : 600,
+  });
 
   // Use refs for performance metrics to avoid React re-renders during animation
   const performanceMetricsRef = useRef<PerformanceMetrics>({
@@ -64,15 +53,8 @@ function SmokeSimulationComponent() {
     useState<PerformanceMetrics>(performanceMetricsRef.current);
 
   const isPerformanceVisible = usePerformanceToggle();
-  const [selectedMode, setSelectedMode] = usePersistedState<ShaderMode>(
-    "smoke-simulation-shader-mode",
-    ShaderMode.DENSITY
-  );
-  const [selectedTexture, setSelectedTexture] =
-    usePersistedState<SmokeTextureID>(
-      "smoke-simulation-texture",
-      "smokeDensity"
-    );
+  const selectedMode = ShaderMode.DENSITY;
+  const selectedTexture: SmokeTextureID = "smokeDensity";
 
   // Mouse interaction state - use refs to avoid triggering re-renders
   const isMouseDownRef = useRef(false);
@@ -100,6 +82,62 @@ function SmokeSimulationComponent() {
   const audioVisualization = useAudioVisualization();
   const audioInitializedRef = useRef(false);
 
+  // Handle color selection
+  const handleColorSelect = useCallback((colorIndex: number) => {
+    setSelectedColorIndex(colorIndex);
+    if (smokeSimulation.current) {
+      smokeSimulation.current.setSmokeColor(COLOR_PRESETS[colorIndex].color);
+    }
+  }, []);
+
+  // Show color picker on mouse movement
+  const handleMouseActivity = useCallback(
+    (clientY: number) => {
+      if (!showWelcomeModal) {
+        const threshold = 150; // Show color picker when within 150px of bottom
+        const distanceFromBottom = window.innerHeight - clientY;
+
+        if (distanceFromBottom <= threshold) {
+          setShowColorPicker(true);
+        }
+      }
+    },
+    [showWelcomeModal]
+  );
+
+  // Handle fullscreen functionality
+  const enterFullscreen = useCallback(async () => {
+    try {
+      if (document.documentElement.requestFullscreen) {
+        await document.documentElement.requestFullscreen();
+      }
+    } catch (error) {
+      console.log("Fullscreen not supported or denied:", error);
+      // Continue anyway - fullscreen is optional
+    }
+  }, []);
+
+  // Handle "Enter" button click
+  const handleEnter = useCallback(async () => {
+    setShowWelcomeModal(false);
+    await enterFullscreen();
+  }, [enterFullscreen]);
+
+  // Handle viewport resize
+  useEffect(() => {
+    const handleResize = () => {
+      setCanvasDimensions({
+        width: window.innerWidth,
+        height: window.innerHeight,
+      });
+      // Clear cached canvas bounds when resizing
+      canvasBoundsRef.current = null;
+    };
+
+    window.addEventListener("resize", handleResize);
+    return () => window.removeEventListener("resize", handleResize);
+  }, []);
+
   // Helper function to get cached canvas bounds
   const getCachedCanvasBounds = useCallback(() => {
     const now = performance.now();
@@ -124,12 +162,14 @@ function SmokeSimulationComponent() {
       const canvasX = clientX - rect.left;
       const canvasY = clientY - rect.top;
 
+      // Get the actual grid size from the simulation
+      const gridSize = smokeSimulation.current?.getGridSize();
+      if (!gridSize) return null;
+
       // Scale to grid coordinates
-      const gridX =
-        (canvasX / rect.width) * SIMULATION_CONSTANTS.grid.size.width;
+      const gridX = (canvasX / rect.width) * gridSize.width;
       // Note: Y coordinate should NOT be flipped since both canvas and WebGPU use top-left origin
-      const gridY =
-        (canvasY / rect.height) * SIMULATION_CONSTANTS.grid.size.height;
+      const gridY = (canvasY / rect.height) * gridSize.height;
 
       return { x: gridX, y: gridY };
     },
@@ -159,6 +199,9 @@ function SmokeSimulationComponent() {
           // Handle audio visualization
           audioVisualization.handleMouseDown(event.clientX, event.clientY);
         } else if (event.type === "mousemove") {
+          // Show color picker on mouse activity near bottom
+          handleMouseActivity(event.clientY);
+
           if (isMouseDownRef.current) {
             smokeSimulation.current.addSmoke(coords.x, coords.y);
 
@@ -211,7 +254,7 @@ function SmokeSimulationComponent() {
         }
       }
     },
-    [isInitialized, canvasToGridCoords, audioVisualization]
+    [isInitialized, canvasToGridCoords, audioVisualization, handleMouseActivity]
   );
 
   // Initialize audio visualization when simulation is ready
@@ -325,12 +368,27 @@ function SmokeSimulationComponent() {
       }
 
       console.log("Initializing Smoke Simulation");
-      const simulation = new SmokeSimulation();
+
+      const simulationConfig = {
+        grid: {
+          size: {
+            width: 512,
+            height: Math.floor(
+              512 * (canvasDimensions.height / canvasDimensions.width)
+            ),
+          },
+          scale: 0.9,
+        },
+      };
+
+      const simulation = new SmokeSimulation(simulationConfig);
       smokeSimulation.current = simulation;
 
       try {
         await simulation.initialize(canvasRef);
         if (smokeSimulation.current === simulation) {
+          // Set initial color
+          simulation.setSmokeColor(COLOR_PRESETS[selectedColorIndex].color);
           setIsInitialized(true);
           setInitError(null);
         }
@@ -347,7 +405,7 @@ function SmokeSimulationComponent() {
       }
     };
     runSimulation();
-  }, []);
+  }, [canvasDimensions, selectedColorIndex]); // Add selectedColorIndex as dependency
 
   // Animation loop
   useEffect(() => {
@@ -396,116 +454,85 @@ function SmokeSimulationComponent() {
     }
   }, [selectedMode, selectedTexture, isInitialized, isPlaying]);
 
-  const handleStep = useCallback(() => {
-    if (smokeSimulation.current && isInitialized) {
-      try {
-        smokeSimulation.current.step({
-          shaderMode: selectedMode,
-          texture: selectedTexture,
-        });
-      } catch (error) {
-        console.error("Failed to step simulation:", error);
-      }
-    }
-  }, [isInitialized, selectedMode, selectedTexture]);
-
-  const handleRestart = useCallback(async () => {
-    if (!smokeSimulation.current || !isInitialized) {
-      return;
-    }
-
-    try {
-      smokeSimulation.current.reset(selectedMode, selectedTexture);
-      // Reset audio visualization state
-      audioVisualization.reset();
-    } catch (error) {
-      console.error("Failed to restart simulation:", error);
-    }
-  }, [isInitialized, selectedMode, selectedTexture, audioVisualization]);
-
-  const handleModeChange = useCallback(
-    (value: string) => {
-      const mode = parseInt(value) as ShaderMode;
-      const modeOption = VISUALIZATION_MODES.find((m) => m.value === mode);
-      if (modeOption) {
-        setSelectedMode(mode);
-        setSelectedTexture(modeOption.texture);
-      }
-    },
-    [setSelectedMode, setSelectedTexture]
-  );
-
-  // Custom visualization mode dropdown
-  const visualizationControl = (
-    <div className="w-full">
-      <label className="block text-sm font-medium text-gray-700 mb-2">
-        Visualization Mode
-      </label>
-      <Select
-        value={selectedMode.toString()}
-        onValueChange={handleModeChange}
-        disabled={!isInitialized}
-      >
-        <SelectTrigger className="w-full">
-          <SelectValue placeholder="Select visualization mode" />
-        </SelectTrigger>
-        <SelectContent>
-          {VISUALIZATION_MODES.map((mode) => (
-            <SelectItem key={mode.value} value={mode.value.toString()}>
-              {mode.label}
-            </SelectItem>
-          ))}
-        </SelectContent>
-      </Select>
-    </div>
-  );
-
   return (
-    <div>
-      <PerformanceViewer
-        metrics={performanceMetrics}
-        eventMetrics={eventPerformanceMetrics}
-        isVisible={isPerformanceVisible}
-      />
+    <>
+      {/* Welcome Modal */}
+      <Dialog open={showWelcomeModal} onOpenChange={() => {}}>
+        <DialogContent
+          hideCloseButton={true}
+          className="max-w-lg bg-black/95 backdrop-blur-md border-neutral-800 text-neutral-100 shadow-2xl"
+        >
+          <DialogHeader className="text-center space-y-6">
+            <DialogTitle
+              className="text-center text-4xl font-normal tracking-wide text-neutral-100"
+              style={{ fontFamily: "Baskervville, serif" }}
+            >
+              FluxLab
+            </DialogTitle>
+            <div className="space-y-4">
+              <div className="w-16 h-px bg-neutral-600 mx-auto"></div>
+              <DialogDescription
+                className="text-neutral-400 text-base font-light tracking-wide text-center"
+                style={{ fontFamily: "Baskervville, serif" }}
+              >
+                Click and drag to create music
+              </DialogDescription>
+            </div>
+          </DialogHeader>
+          <DialogFooter className="mt-8">
+            <Button
+              onClick={handleEnter}
+              variant="outline"
+              className="w-full bg-transparent border-neutral-600 text-neutral-100 hover:bg-neutral-900 hover:border-neutral-500 py-3 text-lg font-light tracking-wider transition-all duration-500 hover:text-neutral-200"
+              style={{
+                fontFamily: "Baskervville, serif",
+                letterSpacing: "0.1em",
+                transition: "all 0.5s ease",
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.letterSpacing = "0.3em";
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.letterSpacing = "0.1em";
+              }}
+            >
+              Enter
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
-      <div className="max-w-6xl mx-auto flex flex-col items-center gap-6">
-        <div className="text-center">
-          <h2 className="text-2xl font-bold text-gray-800 mb-2">
-            Smoke Simulation
-          </h2>
-          <p className="text-sm text-gray-600 max-w-md">
-            Click and drag on the simulation to add smoke.
-          </p>
-        </div>
+      {/* Main Simulation */}
+      <div className="w-screen h-screen overflow-hidden relative">
+        <PerformanceViewer
+          metrics={performanceMetrics}
+          eventMetrics={eventPerformanceMetrics}
+          isVisible={isPerformanceVisible}
+        />
+
+        {/* Color Picker Component */}
+        <ColorPicker
+          selectedColorIndex={selectedColorIndex}
+          onColorSelect={handleColorSelect}
+          isVisible={showColorPicker}
+          onVisibilityChange={setShowColorPicker}
+        />
 
         {initError && (
-          <div className="text-red-500 text-sm max-w-md text-center bg-red-50 p-3 rounded-lg border border-red-200">
+          <div className="absolute top-4 left-1/2 transform -translate-x-1/2 z-10 text-red-500 text-sm bg-red-50 p-3 rounded-lg border border-red-200">
             <strong>Error:</strong> {initError}
           </div>
         )}
 
-        <div className="flex flex-col md:flex-row items-center md:items-start gap-6 w-full justify-center">
-          <div className="flex-shrink-0">
-            <canvas
-              width={CANVAS_WIDTH}
-              height={CANVAS_HEIGHT}
-              ref={canvasRef}
-              className="border border-gray-300 rounded-lg shadow-lg cursor-crosshair"
-            />
-          </div>
-
-          <SimulationControls
-            isInitialized={isInitialized}
-            isPlaying={isPlaying}
-            setIsPlaying={setIsPlaying}
-            onStep={handleStep}
-            onRestart={handleRestart}
-            title="Smoke Simulation"
-            customControls={visualizationControl}
-          />
-        </div>
+        <canvas
+          width={canvasDimensions.width}
+          height={canvasDimensions.height}
+          ref={canvasRef}
+          className="block cursor-crosshair"
+          style={{ width: "100vw", height: "100vh" }}
+        />
       </div>
-    </div>
+    </>
   );
 }
 

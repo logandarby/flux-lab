@@ -4,8 +4,8 @@ import {
   createRootRoute,
   Outlet,
 } from "@tanstack/react-router";
-import TestsPage from "../app/TestsPage";
-import { TestComponent } from "./TestComponent";
+import TestsPage from "./component/TestsPage";
+import { TestComponent } from "./component/TestComponent";
 import SmokeSimulationComponent from "./component/SmokeSimulationComponent";
 
 // Root route
@@ -17,11 +17,7 @@ const rootRoute = createRootRoute({
 const indexRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/",
-  component: () => (
-    <div className="p-8">
-      <SmokeSimulationComponent />
-    </div>
-  ),
+  component: () => <SmokeSimulationComponent />,
 });
 
 // Tests listing route

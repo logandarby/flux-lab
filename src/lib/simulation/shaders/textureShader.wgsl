@@ -41,6 +41,8 @@ struct FragmentInput {
     mean: f32,
     // 3 pseudo random sampled values from the GPU
     offsets: vec3f,
+    // RGB color for smoke shading
+    smokeColor: vec3f,
 }
 
 @group(0) @binding(0) var texture: texture_2d<f32>;
@@ -76,40 +78,56 @@ fn shadePressure(value: f32, input: VertexOutput) -> vec4f {
 fn shadeDensity(value: f32, input: VertexOutput) -> vec4f {
     let density = clamp(value, 0.0, 1.0);
     
-    let color1 = vec3f(0.05, 0.05, 0.15);
-    let color2 = vec3f(0.15, 0.05, 0.35);
-    let color3 = vec3f(0.45, 0.15, 0.65);
-    let color4 = vec3f(0.65, 0.35, 0.85);
-    let color5 = vec3f(0.75, 0.65, 0.95);
-    let color6 = vec3f(0.95, 0.95, 1.0);
+    // Get base color from uniform
+    let baseColor = uniformInput.smokeColor;
+    
+    // Add complementary tinting to shadows for more visual interest
+    let shadowTint = vec3f(0.1, 0.05, 0.2); // Cool blue tint for shadows
+    let highlightBoost = vec3f(1.3, 1.2, 1.4); // Warm boost for highlights
+    
+    // Enhanced gradient stops with better contrast and vibrancy
+    let color1 = (baseColor * 0.05) + shadowTint;
+    let color2 = (baseColor * 0.2) + shadowTint * 0.5;
+    let color3 = baseColor * 0.4;
+    let color4 = baseColor * 0.7;
+    let color5 = baseColor * 1.0 + vec3f(0.1, 0.1, 0.1);
+    let color6 = baseColor * highlightBoost;
+    let color7 = mix(baseColor * 1.5, vec3f(1.0, 1.0, 1.0), 0.3);
+    let color8 = vec3f(1.2, 1.2, 1.2);
     
     var finalColor: vec3f;
     
-    // Multi-stop gradient interpolation
-    if (density < 0.2) {
-        let t = density / 0.2;
-        finalColor = mix(color1, color2, t);
-    } else if (density < 0.4) {
-        let t = (density - 0.2) / 0.2;
-        finalColor = mix(color2, color3, t);
+    // multi-stop gradient
+    if (density < 0.15) {
+        let t = density / 0.15;
+        finalColor = mix(color1, color2, smoothstep(0.0, 1.0, t));
+    } else if (density < 0.3) {
+        let t = (density - 0.15) / 0.15;
+        finalColor = mix(color2, color3, smoothstep(0.0, 1.0, t));
+    } else if (density < 0.45) {
+        let t = (density - 0.3) / 0.15;
+        finalColor = mix(color3, color4, smoothstep(0.0, 1.0, t));
     } else if (density < 0.6) {
-        let t = (density - 0.4) / 0.2;
-        finalColor = mix(color3, color4, t);
-    } else if (density < 0.8) {
-        let t = (density - 0.6) / 0.2;
-        finalColor = mix(color4, color5, t);
+        let t = (density - 0.45) / 0.15;
+        finalColor = mix(color4, color5, smoothstep(0.0, 1.0, t));
+    } else if (density < 0.75) {
+        let t = (density - 0.6) / 0.15;
+        finalColor = mix(color5, color6, smoothstep(0.0, 1.0, t));
+    } else if (density < 0.9) {
+        let t = (density - 0.75) / 0.15;
+        finalColor = mix(color6, color7, smoothstep(0.0, 1.0, t));
     } else {
-        let t = (density - 0.8) / 0.2;
-        finalColor = mix(color5, color6, t);
+        let t = (density - 0.9) / 0.1;
+        finalColor = mix(color7, color8, smoothstep(0.0, 1.0, t));
     }
     
-    // Add some subtle brightness boost for glow effect
-    let brightness = 1.0 + density * 0.3;
-    // finalColor = finalColor * brightness;
+    // Add subtle saturation boost for mid-tones
+    let luminance = dot(finalColor, vec3f(0.299, 0.587, 0.114));
+    let saturationBoost = 1.0 + (1.0 - abs(luminance - 0.5) * 2.0) * 0.2;
+    finalColor = mix(vec3f(luminance), finalColor, saturationBoost);
     
-    // Smooth alpha transition - more transparent at low densities
-    let alpha = density;
-    // let alpha = density * density * (3.0 - 2.0 * density); // Smoothstep
+    let alpha = density * density * (3.0 - 2.0 * density); // Smoothstep for better falloff
+    
     return vec4f(finalColor, alpha);
 }
 

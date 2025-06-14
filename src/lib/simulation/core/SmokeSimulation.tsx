@@ -44,6 +44,7 @@ import {
   DEFAULT_VELOCITY_CONTROLS,
   DEFAULT_SMOKE_CONTROLS,
   type SmokeSimulationConfig,
+  type SimulationConstants,
 } from "./types";
 import { SIMULATION_CONSTANTS } from "./constants";
 import { wgsl } from "@/lib/preprocessor/core/wgsl";
@@ -71,6 +72,52 @@ interface ISmokeSimulation {
   sampleTextures(downSample: number): Promise<SmokeTextureExports>;
 
   getPerformanceMetrics(): PerformanceMetrics;
+  setSmokeColor(color: [number, number, number]): void;
+}
+
+// Deep merge utility function for SimulationConstants
+function mergeSimulationConstants(
+  defaults: SimulationConstants,
+  overrides: Partial<SimulationConstants>
+): SimulationConstants {
+  const mergedGrid = {
+    ...defaults.grid,
+    ...overrides.grid,
+  };
+
+  const mergedCompute = {
+    ...defaults.compute,
+    ...overrides.compute,
+  };
+
+  // Compute workgroupCount based on the final merged values
+  const finalCompute = {
+    ...mergedCompute,
+    workgroupCount: Math.ceil(
+      mergedGrid.size.width / mergedCompute.workgroupSize
+    ),
+  };
+
+  return {
+    grid: mergedGrid,
+    compute: finalCompute,
+    physics: {
+      ...defaults.physics,
+      ...overrides.physics,
+    },
+    interaction: {
+      ...defaults.interaction,
+      ...overrides.interaction,
+    },
+    iterations: {
+      ...defaults.iterations,
+      ...overrides.iterations,
+    },
+    particles: {
+      ...defaults.particles,
+      ...overrides.particles,
+    },
+  };
 }
 
 class SmokeSimulation implements ISmokeSimulation {
@@ -94,6 +141,19 @@ class SmokeSimulation implements ISmokeSimulation {
   private advectParticlesPass: AdvectParticlesPass | null = null;
   private isInitialized = false;
   private lastFrameTime: number = performance.now();
+  private config: SimulationConstants;
+  private smokeColor: [number, number, number] = [0.65, 0.35, 0.85]; // Default purple color
+
+  constructor(customConfig?: Partial<SimulationConstants>) {
+    this.config = mergeSimulationConstants(
+      SIMULATION_CONSTANTS,
+      customConfig || {}
+    );
+  }
+
+  public setSmokeColor(color: [number, number, number]): void {
+    this.smokeColor = color;
+  }
 
   public async initialize(canvasRef: React.RefObject<HTMLCanvasElement>) {
     if (this.isInitialized) {
@@ -123,7 +183,7 @@ class SmokeSimulation implements ISmokeSimulation {
     // Create velocity texture (ping-pong)
     this.textureManager.createPingPongTexture("velocity", {
       label: "Velocity Texture",
-      size: SIMULATION_CONSTANTS.grid.size,
+      size: this.config.grid.size,
       format: "rg32float",
       usage:
         GPUTextureUsage.STORAGE_BINDING |
@@ -135,7 +195,7 @@ class SmokeSimulation implements ISmokeSimulation {
     // Create divergence texture
     this.textureManager.createTexture("divergence", {
       label: "Divergence texture",
-      size: SIMULATION_CONSTANTS.grid.size,
+      size: this.config.grid.size,
       format: "r32float",
       usage:
         GPUTextureUsage.TEXTURE_BINDING |
@@ -146,7 +206,7 @@ class SmokeSimulation implements ISmokeSimulation {
     // Create pressure texture (ping-pong)
     this.textureManager.createPingPongTexture("pressure", {
       label: "Pressure Texture",
-      size: SIMULATION_CONSTANTS.grid.size,
+      size: this.config.grid.size,
       format: "r32float",
       usage:
         GPUTextureUsage.STORAGE_BINDING |
@@ -158,7 +218,7 @@ class SmokeSimulation implements ISmokeSimulation {
     // Smoke particle texture (positions)
     this.textureManager.createPingPongTexture("smokeParticlePosition", {
       label: "Smoke Position Texture",
-      size: SIMULATION_CONSTANTS.particles.smokeDimensions,
+      size: this.config.particles.smokeDimensions,
       format: "rg32float",
       usage:
         GPUTextureUsage.STORAGE_BINDING |
@@ -169,7 +229,7 @@ class SmokeSimulation implements ISmokeSimulation {
     // Smoke density texture
     this.textureManager.createPingPongTexture("smokeDensity", {
       label: "Smoke Density Texture",
-      size: SIMULATION_CONSTANTS.grid.size,
+      size: this.config.grid.size,
       format: "r32float",
       usage:
         GPUTextureUsage.STORAGE_BINDING |
@@ -178,62 +238,62 @@ class SmokeSimulation implements ISmokeSimulation {
         GPUTextureUsage.COPY_SRC,
     });
 
-    initializeTextures(this.textureManager, this.resources.device);
+    initializeTextures(this.textureManager, this.resources.device, this.config);
 
     // Initialize simulation passes
     this.advectionPass = new VelocityAdvectionPass(
       this.resources.device,
-      SIMULATION_CONSTANTS.compute.workgroupSize
+      this.config.compute.workgroupSize
     );
     this.smokeAdvectionPass = new SmokeAdvectionPasss(
       this.resources.device,
-      SIMULATION_CONSTANTS.compute.workgroupSize
+      this.config.compute.workgroupSize
     );
     this.smokeDiffusionPass = new SmokeDiffusionPass(
       this.resources.device,
-      SIMULATION_CONSTANTS.compute.workgroupSize
+      this.config.compute.workgroupSize
     );
     this.smokeDissipationPass = new SmokeDissipationPass(
       this.resources.device,
-      SIMULATION_CONSTANTS.compute.workgroupSize
+      this.config.compute.workgroupSize
     );
     this.velocityDissipationPass = new VelocityDissipationPass(
       this.resources.device,
-      SIMULATION_CONSTANTS.compute.workgroupSize
+      this.config.compute.workgroupSize
     );
     this.diffusionPass = new DiffusionPass(
       this.resources.device,
-      SIMULATION_CONSTANTS.compute.workgroupSize
+      this.config.compute.workgroupSize
     );
     this.divergencePass = new DivergencePass(
       this.resources.device,
-      SIMULATION_CONSTANTS.compute.workgroupSize
+      this.config.compute.workgroupSize
     );
     this.pressurePass = new PressurePass(
       this.resources.device,
-      SIMULATION_CONSTANTS.compute.workgroupSize
+      this.config.compute.workgroupSize
     );
     this.gradientSubtractionPass = new GradientSubtractionPass(
       this.resources.device,
-      SIMULATION_CONSTANTS.compute.workgroupSize
+      this.config.compute.workgroupSize
     );
     this.boundaryConditionsPass = new BoundaryConditionsPass(
       this.resources.device,
-      SIMULATION_CONSTANTS.compute.workgroupSize
+      this.config.compute.workgroupSize
     );
     this.advectParticlesPass = new AdvectParticlesPass(
       this.resources.device,
-      SIMULATION_CONSTANTS.compute.workgroupSize
+      this.config.compute.workgroupSize
     );
 
     // Initialize user interaction passes
     this.addSmokePass = new AddSmokePass(
       this.resources.device,
-      SIMULATION_CONSTANTS.compute.workgroupSize
+      this.config.compute.workgroupSize
     );
     this.addVelocityPass = new AddVelocityPass(
       this.resources.device,
-      SIMULATION_CONSTANTS.compute.workgroupSize
+      this.config.compute.workgroupSize
     );
 
     // Create rendering pass
@@ -275,7 +335,7 @@ class SmokeSimulation implements ISmokeSimulation {
     const currentTime = performance.now();
     const realTimeTimestep = Math.min(
       (currentTime - this.lastFrameTime) / 1000,
-      SIMULATION_CONSTANTS.physics.maxTimestep
+      this.config.physics.maxTimestep
     ); // Cap at maxTimestep to prevent instability during frame drops
     this.lastFrameTime = currentTime;
 
@@ -363,6 +423,7 @@ class SmokeSimulation implements ISmokeSimulation {
         stddev: 0.05,
         offsets: [Math.random(), Math.random(), Math.random()],
       },
+      smokeColor: this.smokeColor,
     });
     this.renderingPass.execute(
       renderPassEncoder,
@@ -419,13 +480,13 @@ class SmokeSimulation implements ISmokeSimulation {
     if (velocityControls.enableAdvection) {
       const advectionUniforms = new AdvectionUniforms(
         realTimeTimestep,
-        SIMULATION_CONSTANTS.physics.velocityAdvection
+        this.config.physics.velocityAdvection
       );
       this.advectionPass!.executeWithUniforms(
         computePassEncoder,
         advectionUniforms,
         this.textureManager!,
-        SIMULATION_CONSTANTS.compute.workgroupCount
+        this.config.compute.workgroupCount
       );
       this.textureManager!.swap("velocity");
     }
@@ -433,39 +494,35 @@ class SmokeSimulation implements ISmokeSimulation {
     if (velocityControls.enableDiffusion) {
       const diffusionUniforms = new DiffusionUniforms(
         realTimeTimestep,
-        SIMULATION_CONSTANTS.physics.diffusionFactor
+        this.config.physics.diffusionFactor
       );
       this.diffusionPass!.executeIterations(
         computePassEncoder,
         diffusionUniforms,
         this.textureManager!,
-        SIMULATION_CONSTANTS.compute.workgroupCount,
-        SIMULATION_CONSTANTS.iterations.diffusion
+        this.config.compute.workgroupCount,
+        this.config.iterations.diffusion
       );
     }
 
     if (velocityControls.enableDivergence) {
-      const divergenceUniforms = new DivergenceUniforms(
-        SIMULATION_CONSTANTS.grid.scale
-      );
+      const divergenceUniforms = new DivergenceUniforms(this.config.grid.scale);
       this.divergencePass!.executeWithUniforms(
         computePassEncoder,
         divergenceUniforms,
         this.textureManager!,
-        SIMULATION_CONSTANTS.compute.workgroupCount
+        this.config.compute.workgroupCount
       );
     }
 
     if (velocityControls.enablePressureProjection) {
-      const pressureUniforms = new PressureUniforms(
-        SIMULATION_CONSTANTS.grid.scale
-      );
+      const pressureUniforms = new PressureUniforms(this.config.grid.scale);
       this.pressurePass!.executeIterations(
         computePassEncoder,
         pressureUniforms,
         this.textureManager!,
-        SIMULATION_CONSTANTS.compute.workgroupCount,
-        SIMULATION_CONSTANTS.iterations.pressure
+        this.config.compute.workgroupCount,
+        this.config.iterations.pressure
       );
     }
 
@@ -478,20 +535,20 @@ class SmokeSimulation implements ISmokeSimulation {
         "pressure",
         pressureBoundaryUniforms,
         this.textureManager!,
-        SIMULATION_CONSTANTS.compute.workgroupCount
+        this.config.compute.workgroupCount
       );
       this.textureManager!.swap("pressure");
     }
 
     if (velocityControls.enableGradientSubtraction) {
       const gradientUniforms = new GradientSubtractionUniforms(
-        SIMULATION_CONSTANTS.grid.scale
+        this.config.grid.scale
       );
       this.gradientSubtractionPass!.executeWithUniforms(
         computePassEncoder,
         gradientUniforms,
         this.textureManager!,
-        SIMULATION_CONSTANTS.compute.workgroupCount
+        this.config.compute.workgroupCount
       );
       this.textureManager!.swap("velocity");
     }
@@ -505,20 +562,20 @@ class SmokeSimulation implements ISmokeSimulation {
         "velocity",
         velocityBoundaryUniforms,
         this.textureManager!,
-        SIMULATION_CONSTANTS.compute.workgroupCount
+        this.config.compute.workgroupCount
       );
       this.textureManager!.swap("velocity");
     }
 
     if (velocityControls.enableDissipation) {
       const velocityDissipationUniforms = new DissipationUniforms(
-        SIMULATION_CONSTANTS.physics.velocityDissipationFactor
+        this.config.physics.velocityDissipationFactor
       );
       this.velocityDissipationPass!.executeWithUniforms(
         computePassEncoder,
         velocityDissipationUniforms,
         this.textureManager!,
-        SIMULATION_CONSTANTS.compute.workgroupCount
+        this.config.compute.workgroupCount
       );
       this.textureManager!.swap("velocity");
     }
@@ -526,13 +583,13 @@ class SmokeSimulation implements ISmokeSimulation {
     if (smokeControls.enableAdvection) {
       const smokeAdvectionUniforms = new AdvectionUniforms(
         realTimeTimestep,
-        SIMULATION_CONSTANTS.physics.smokeAdvection
+        this.config.physics.smokeAdvection
       );
       this.smokeAdvectionPass!.executeWithUniforms(
         computePassEncoder,
         smokeAdvectionUniforms,
         this.textureManager!,
-        SIMULATION_CONSTANTS.compute.workgroupCount
+        this.config.compute.workgroupCount
       );
       this.textureManager!.swap("smokeDensity");
     }
@@ -546,7 +603,7 @@ class SmokeSimulation implements ISmokeSimulation {
         "smokeDensity",
         smokeBoundaryUniforms,
         this.textureManager!,
-        SIMULATION_CONSTANTS.compute.workgroupCount
+        this.config.compute.workgroupCount
       );
       this.textureManager!.swap("smokeDensity");
     }
@@ -554,27 +611,27 @@ class SmokeSimulation implements ISmokeSimulation {
     if (smokeControls.enableDiffusion) {
       const smokeDiffusionUniforms = new DiffusionUniforms(
         realTimeTimestep,
-        SIMULATION_CONSTANTS.physics.smokeDiffusion
+        this.config.physics.smokeDiffusion
       );
       this.smokeDiffusionPass!.executeIterations(
         computePassEncoder,
         smokeDiffusionUniforms,
         this.textureManager!,
-        SIMULATION_CONSTANTS.compute.workgroupCount,
-        SIMULATION_CONSTANTS.iterations.diffusion
+        this.config.compute.workgroupCount,
+        this.config.iterations.diffusion
       );
       this.textureManager!.swap("smokeDensity");
     }
 
     if (smokeControls.enableDissipation) {
       const smokeDissipationUniforms = new DissipationUniforms(
-        SIMULATION_CONSTANTS.physics.smokeDissipationFactor
+        this.config.physics.smokeDissipationFactor
       );
       this.smokeDissipationPass!.executeWithUniforms(
         computePassEncoder,
         smokeDissipationUniforms,
         this.textureManager!,
-        SIMULATION_CONSTANTS.compute.workgroupCount
+        this.config.compute.workgroupCount
       );
       this.textureManager!.swap("smokeDensity");
     }
@@ -587,7 +644,7 @@ class SmokeSimulation implements ISmokeSimulation {
         computePassEncoder,
         advectParticlesUniforms,
         this.textureManager!,
-        SIMULATION_CONSTANTS.compute.workgroupCount
+        this.config.compute.workgroupCount
       );
       this.textureManager!.swap("smokeParticlePosition");
     }
@@ -600,7 +657,7 @@ class SmokeSimulation implements ISmokeSimulation {
   }
 
   public getGridSize() {
-    return SIMULATION_CONSTANTS.grid.size;
+    return this.config.grid.size;
   }
 
   public async sampleTextures(
@@ -613,7 +670,7 @@ class SmokeSimulation implements ISmokeSimulation {
       );
     }
 
-    const gridSize = SIMULATION_CONSTANTS.grid.size;
+    const gridSize = this.config.grid.size;
     const sampledWidth = Math.floor(gridSize.width / downSample);
     const sampledHeight = Math.floor(gridSize.height / downSample);
     const sampledPixels = sampledWidth * sampledHeight;
@@ -742,7 +799,7 @@ class SmokeSimulation implements ISmokeSimulation {
     this.lastFrameTime = performance.now();
 
     // Reinitialize textures
-    initializeTextures(this.textureManager, this.resources.device);
+    initializeTextures(this.textureManager, this.resources.device, this.config);
 
     // Render initial state
     this.step({ renderOnly: true, shaderMode, texture });
@@ -763,8 +820,8 @@ class SmokeSimulation implements ISmokeSimulation {
     const addSmokeUniforms = new AddSmokeUniforms(
       x,
       y,
-      SIMULATION_CONSTANTS.interaction.radius,
-      SIMULATION_CONSTANTS.interaction.smokeIntensity
+      this.config.interaction.radius,
+      this.config.interaction.smokeIntensity
     );
 
     const addSmokePassEncoder = commandEncoder.beginComputePass({
@@ -774,7 +831,7 @@ class SmokeSimulation implements ISmokeSimulation {
       addSmokePassEncoder,
       addSmokeUniforms,
       this.textureManager,
-      SIMULATION_CONSTANTS.compute.workgroupCount
+      this.config.compute.workgroupCount
     );
     addSmokePassEncoder.end();
     this.textureManager.swap("smokeDensity");
@@ -804,8 +861,8 @@ class SmokeSimulation implements ISmokeSimulation {
       y,
       velocityX,
       velocityY,
-      SIMULATION_CONSTANTS.interaction.radius,
-      SIMULATION_CONSTANTS.interaction.velocityIntensity
+      this.config.interaction.radius,
+      this.config.interaction.velocityIntensity
     );
 
     const addVelocityPassEncoder = commandEncoder.beginComputePass({
@@ -815,7 +872,7 @@ class SmokeSimulation implements ISmokeSimulation {
       addVelocityPassEncoder,
       addVelocityUniforms,
       this.textureManager,
-      SIMULATION_CONSTANTS.compute.workgroupCount
+      this.config.compute.workgroupCount
     );
     addVelocityPassEncoder.end();
     this.textureManager.swap("velocity");
@@ -863,10 +920,11 @@ class SmokeSimulation implements ISmokeSimulation {
 
 function initializeTextures(
   textureManager: TextureManager<SmokeTextureID>,
-  device: GPUDevice
+  device: GPUDevice,
+  config: SimulationConstants
 ): void {
-  const gridSize = SIMULATION_CONSTANTS.grid.size;
-  const particleSize = SIMULATION_CONSTANTS.particles.smokeDimensions;
+  const gridSize = config.grid.size;
+  const particleSize = config.particles.smokeDimensions;
   const totalGridPixels = gridSize.width * gridSize.height;
   const totalParticlePixels = particleSize.width * particleSize.height;
 

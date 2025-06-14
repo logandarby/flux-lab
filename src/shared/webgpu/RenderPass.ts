@@ -1,4 +1,5 @@
 import type { TextureManager } from "./TextureManager";
+import { UniformBufferWriter } from "./UniformManager";
 
 export interface RenderPassConfig {
   name: string;
@@ -21,6 +22,7 @@ interface NoiseArguments {
 export interface RenderUniformWriteArgs {
   shaderMode: ShaderMode;
   noise: NoiseArguments;
+  smokeColor: [number, number, number];
 }
 
 export interface RenderPassDrawConfig {
@@ -57,7 +59,7 @@ export class RenderPass<TextureID extends string | number> {
     });
     this.uniformBuffer = this.device.createBuffer({
       label: `${this.config.name} Uniform Buffer`,
-      size: 8 * 4, // 1 unsigned int + 5 floats
+      size: 12 * 4, // 1 unsigned int + 8 floats, padded to 16-byte alignment (48 bytes total)
       usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
     });
   }
@@ -123,17 +125,18 @@ export class RenderPass<TextureID extends string | number> {
   public writeToUniformBuffer({
     noise,
     shaderMode,
+    smokeColor,
   }: RenderUniformWriteArgs): void {
-    this.device.queue.writeBuffer(
-      this.uniformBuffer,
-      0,
-      new Uint32Array([shaderMode])
-    );
-    this.device.queue.writeBuffer(
-      this.uniformBuffer,
-      4,
-      new Float32Array([noise.stddev, noise.mean, ...noise.offsets])
-    );
+    const uniformData = new ArrayBuffer(48);
+    const writer = new UniformBufferWriter(uniformData);
+
+    writer.writeUint32(shaderMode);
+    writer.writeFloat32(noise.stddev);
+    writer.writeFloat32(noise.mean);
+    writer.writeVec3f(noise.offsets[0], noise.offsets[1], noise.offsets[2]);
+    writer.writeVec3f(smokeColor[0], smokeColor[1], smokeColor[2]);
+
+    this.device.queue.writeBuffer(this.uniformBuffer, 0, uniformData);
   }
 
   public execute(
