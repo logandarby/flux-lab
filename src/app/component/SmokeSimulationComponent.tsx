@@ -53,6 +53,10 @@ function SmokeSimulationComponent() {
   // Window focus state for pausing/resuming lava lamp
   const [isWindowFocused, setIsWindowFocused] = useState(true);
 
+  // Cursor visibility state
+  const [isCursorVisible, setIsCursorVisible] = useState(true);
+  const cursorTimeoutRef = useRef<number | null>(null);
+
   // Canvas dimensions state for viewport sizing
   const [canvasDimensions, setCanvasDimensions] = useState({
     width: typeof window !== "undefined" ? window.innerWidth : 800,
@@ -118,14 +122,29 @@ function SmokeSimulationComponent() {
     }
   }, []);
 
-  // Show color picker on mouse movement
+  // Handle mouse activity
   const handleMouseActivity = useCallback(
     (clientY: number) => {
       if (!showWelcomeModal && isMouseNearBottom(clientY)) {
         setShowColorPicker(true);
       }
+
+      // Show cursor and reset hide timer
+      if (!isCursorVisible) {
+        setIsCursorVisible(true);
+      }
+
+      // Clear existing timeout
+      if (cursorTimeoutRef.current) {
+        clearTimeout(cursorTimeoutRef.current);
+      }
+
+      // Set new timeout to hide cursor after 3 seconds
+      cursorTimeoutRef.current = setTimeout(() => {
+        setIsCursorVisible(false);
+      }, 3000);
     },
-    [showWelcomeModal]
+    [showWelcomeModal, isCursorVisible]
   );
 
   // Handle fullscreen functionality
@@ -406,6 +425,11 @@ function SmokeSimulationComponent() {
     return () => {
       console.log("Component cleanup - destroying simulation");
 
+      // Clear cursor timeout
+      if (cursorTimeoutRef.current) {
+        clearTimeout(cursorTimeoutRef.current);
+      }
+
       // Clear all lava lamp intervals
       // eslint-disable-next-line react-hooks/exhaustive-deps
       clearLavaLampIntervals(lavaLampIntervalsRef.current);
@@ -600,8 +624,12 @@ function SmokeSimulationComponent() {
           width={canvasDimensions.width}
           height={canvasDimensions.height}
           ref={canvasRef}
-          className="block cursor-crosshair"
-          style={{ width: "100vw", height: "100vh" }}
+          className="block"
+          style={{
+            width: "100vw",
+            height: "100vh",
+            cursor: isCursorVisible ? "crosshair" : "none",
+          }}
         />
       </div>
     </>
