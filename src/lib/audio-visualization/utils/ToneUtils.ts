@@ -16,6 +16,7 @@ export class ToneUtils {
    * (such as click, keydown, touchstart, etc.) due to browser autoplay policies.
    */
   public static async initialize(): Promise<void> {
+    console.log("Initializing ToneJS");
     if (ToneUtils.initialized) return;
 
     try {
