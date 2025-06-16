@@ -47,9 +47,6 @@ export class AudioVisualizationMediator {
     this.canvas = canvas;
     this.simulation = simulation;
 
-    // Initialize ToneJS
-    await ToneUtils.initialize();
-
     // Set up audio preset (default to pentatonic if none provided)
     this.audioPreset = audioPreset ?? new PentatonicSynthPreset();
 
@@ -85,21 +82,6 @@ export class AudioVisualizationMediator {
    */
   async onMouseDown(clientX: number, clientY: number): Promise<void> {
     if (!this.audioPreset) return;
-
-    // Try to initialize audio if not already initialized
-    if (!this.audioInitialized) {
-      try {
-        await ToneUtils.initialize();
-        this.audioInitialized = true;
-        console.log("Audio engine initialized successfully");
-        this.removeAudioInitializationListeners();
-      } catch (error) {
-        console.warn("Failed to initialize audio engine:", error);
-        return;
-      }
-    }
-
-    if (!this.audioInitialized) return;
 
     this.isMouseDown = true;
     const coords = this.getCoordinates(clientX, clientY);
