@@ -2,6 +2,7 @@ import * as Tone from "tone";
 import type { SmokeTextureExports } from "@/lib/simulation/core/SmokeSimulation";
 import type { AudioPreset } from "../types";
 import { ToneUtils } from "../utils/ToneUtils";
+import { CustomPolySynth } from "../synth/CustomPolySynth";
 
 export type NoteVelocity = Tone.Unit.NormalRange;
 
@@ -33,7 +34,7 @@ export class PentatonicSynthPreset implements AudioPreset {
   ];
 
   private lastPlayedNote: Note | null = null;
-  private synth: Tone.PolySynth | null = null;
+  private synth: CustomPolySynth<Tone.Synth> | null = null;
 
   constructor() {
     this.initializeSynth();
@@ -68,23 +69,25 @@ export class PentatonicSynthPreset implements AudioPreset {
   }
 
   private initializeSynth(): void {
-    const synth = new Tone.PolySynth(Tone.Synth, {
-      envelope: {
-        attack: 0.8,
-        decay: 0,
-        sustain: 1,
-        release: 1.2,
+    const synth = new CustomPolySynth(Tone.Synth, {
+      maxPolyphony: 15,
+      voiceOptions: {
+        envelope: {
+          attack: 4,
+          decay: 0,
+          sustain: 1,
+          release: 1.2,
+        },
       },
     });
-    synth.maxPolyphony = 100;
 
     const reverb = new Tone.Reverb({
       decay: 2,
       wet: 0.9,
     });
     const chorus = new Tone.Chorus(4, 2.5, 1);
-    const delay = new Tone.PingPongDelay("4n", 0.5).chain(new Tone.Gain(0.7));
-    const master = new Tone.Gain(1.0).toDestination();
+    const delay = new Tone.PingPongDelay("4t", 0.5).chain(new Tone.Gain(0.3));
+    const master = new Tone.Gain(3.0).toDestination();
 
     synth.chain(chorus, reverb, master);
     synth.chain(chorus, delay, reverb, master);
