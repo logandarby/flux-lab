@@ -36,7 +36,7 @@ export const SIMULATION_CONSTANTS: SimulationConstants = {
 
   iterations: {
     diffusion: 25,
-    pressure: 80,
+    pressure: 40,
   },
 
   particles: {

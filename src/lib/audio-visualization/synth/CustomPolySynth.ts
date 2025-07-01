@@ -14,6 +14,7 @@ export interface Voice {
   dispose(): void;
   connect(destination: Tone.InputNode): this;
   toDestination(): this;
+  timbre?: Tone.Unit.NormalRange; // Optional timbre property
 }
 
 /**
@@ -103,14 +104,22 @@ export class CustomPolySynth<V extends Voice> extends Tone.ToneAudioNode {
 
   /**
    * Triggers both attack and release of a note with a specified duration
+   * Optionally sets timbre if the voice supports it
    */
   triggerAttackRelease(
     note: Tone.Unit.Frequency,
     duration: Tone.Unit.Time,
     time?: Tone.Unit.Time,
-    velocity?: Tone.Unit.NormalRange
+    velocity?: Tone.Unit.NormalRange,
+    timbre?: Tone.Unit.NormalRange
   ): this {
     const voice = this.getNextVoice();
+
+    // Set timbre if provided and voice supports it
+    if (timbre !== undefined && "timbre" in voice) {
+      (voice as Voice & { timbre: Tone.Unit.NormalRange }).timbre = timbre;
+    }
+
     voice.triggerAttackRelease(note, duration, time, velocity);
     return this;
   }

@@ -3,16 +3,18 @@ import type { SmokeTextureExports } from "@/lib/simulation/core/SmokeSimulation"
 import type { AudioPreset } from "../types";
 import { ToneUtils } from "../utils/ToneUtils";
 import { CustomPolySynth } from "../synth/CustomPolySynth";
+import { TimbralSynth } from "../synth/TimbralSynth";
 
 export type NoteVelocity = Tone.Unit.NormalRange;
 
 export interface Note {
   pitch: Tone.Unit.Frequency;
   velocity: NoteVelocity;
+  timbre: Tone.Unit.NormalRange;
 }
 
 /**
- * Default pentatonic synthesis preset
+ * Default pentatonic synthesis preset with timbral morphing
  */
 export class PentatonicSynthPreset implements AudioPreset {
   private static readonly PENTATONIC_SCALE = [
@@ -34,7 +36,7 @@ export class PentatonicSynthPreset implements AudioPreset {
   ];
 
   private lastPlayedNote: Note | null = null;
-  private synth: CustomPolySynth<Tone.Synth> | null = null;
+  private synth: CustomPolySynth<TimbralSynth> | null = null;
 
   constructor() {
     this.initializeSynth();
@@ -69,8 +71,8 @@ export class PentatonicSynthPreset implements AudioPreset {
   }
 
   private initializeSynth(): void {
-    const synth = new CustomPolySynth(Tone.Synth, {
-      maxPolyphony: 15,
+    const synth = new CustomPolySynth(TimbralSynth, {
+      maxPolyphony: 10,
       voiceOptions: {
         envelope: {
           attack: 4,
@@ -78,6 +80,7 @@ export class PentatonicSynthPreset implements AudioPreset {
           sustain: 1,
           release: 1.2,
         },
+        timbre: 0, // Default timbre value
       },
     });
 
@@ -105,7 +108,8 @@ export class PentatonicSynthPreset implements AudioPreset {
       note.pitch,
       "32n",
       undefined,
-      note.velocity
+      note.velocity,
+      note.timbre
     );
   }
 
@@ -140,8 +144,11 @@ export class PentatonicSynthPreset implements AudioPreset {
     // Map density to velocity (0-1 range, with minimum threshold for audibility)
     const velocity = Math.max(0.5, Math.min(1.0, density * 2)) as NoteVelocity;
 
-    // Create note and check if it's different from the previous one
-    const note: Note = { pitch, velocity };
+    // Map normalized X to timbre (0 = sine, 1 = fat sawtooth)
+    const timbre = normalizedX as Tone.Unit.NormalRange;
+
+    // Create note with timbre information
+    const note: Note = { pitch, velocity, timbre };
 
     // Only play if the note is different from the previous one
     if (!this.areNotesEqual(this.lastPlayedNote, note)) {
@@ -153,6 +160,10 @@ export class PentatonicSynthPreset implements AudioPreset {
 
   private areNotesEqual(note1: Note | null, note2: Note): boolean {
     if (!note1) return false;
-    return note1.pitch === note2.pitch && note1.velocity === note2.velocity;
+    return (
+      note1.pitch === note2.pitch &&
+      note1.velocity === note2.velocity &&
+      note1.timbre === note2.timbre
+    );
   }
 }
