@@ -4,6 +4,7 @@ import type { AudioPreset } from "../types";
 import { ToneUtils } from "../utils/ToneUtils";
 import { CustomPolySynth } from "../synth/CustomPolySynth";
 import { TimbralSynth } from "../synth/TimbralSynth";
+import { BassSynth } from "../synth/BassSynth";
 
 export type NoteVelocity = Tone.Unit.NormalRange;
 
@@ -14,7 +15,7 @@ export interface Note {
 }
 
 /**
- * Default pentatonic synthesis preset with timbral morphing
+ * Default pentatonic synthesis preset with timbral morphing and bass loop
  */
 export class PentatonicSynthPreset implements AudioPreset {
   private static readonly PENTATONIC_SCALE = [
@@ -35,8 +36,19 @@ export class PentatonicSynthPreset implements AudioPreset {
     1760.0, // C6, D6, E6, G6, A6
   ];
 
+  // Bass loop sequence: A, F, C, D in bass range
+  private static readonly BASS_LOOP = [
+    55.0, // A1
+    43.655, // F1
+    32.705, // C1
+    36.71, // D1
+  ];
+
   private lastPlayedNote: Note | null = null;
   private synth: CustomPolySynth<TimbralSynth> | null = null;
+  private bassSynth: BassSynth | null = null;
+  private bassLoopIndex = 0;
+  private isMouseDown = false;
 
   constructor() {
     this.initializeSynth();
@@ -51,6 +63,14 @@ export class PentatonicSynthPreset implements AudioPreset {
     if (!ToneUtils.isInitialized()) {
       await ToneUtils.initialize();
     }
+    this.isMouseDown = true;
+    this.playBassNote();
+
+    // Control bass synth secondary filter with X position
+    if (this.bassSynth) {
+      this.bassSynth.setSecondaryFilterCutoff(normalizedX);
+    }
+
     await this.playNoteAtPosition(normalizedX, normalizedY, textureData);
   }
 
@@ -59,10 +79,19 @@ export class PentatonicSynthPreset implements AudioPreset {
     normalizedY: number,
     textureData: SmokeTextureExports | null
   ): Promise<void> {
-    await this.playNoteAtPosition(normalizedX, normalizedY, textureData);
+    if (this.isMouseDown) {
+      // Control bass synth secondary filter with X position
+      if (this.bassSynth) {
+        this.bassSynth.setSecondaryFilterCutoff(normalizedX);
+      }
+
+      await this.playNoteAtPosition(normalizedX, normalizedY, textureData);
+    }
   }
 
   async onMouseUp(): Promise<void> {
+    this.isMouseDown = false;
+    this.releaseBassNote();
     this.reset();
   }
 
@@ -71,8 +100,9 @@ export class PentatonicSynthPreset implements AudioPreset {
   }
 
   private initializeSynth(): void {
+    // Initialize main timbral synth
     const synth = new CustomPolySynth(TimbralSynth, {
-      maxPolyphony: 10,
+      maxPolyphony: 8,
       voiceOptions: {
         envelope: {
           attack: 4,
@@ -84,18 +114,44 @@ export class PentatonicSynthPreset implements AudioPreset {
       },
     });
 
+    // Initialize bass synth
+    this.bassSynth = new BassSynth();
+
     const reverb = new Tone.Reverb({
       decay: 2,
       wet: 0.9,
     });
-    const chorus = new Tone.Chorus(4, 2.5, 1);
+    const chorus = new Tone.Chorus(4, 10, 1);
     const delay = new Tone.PingPongDelay("4t", 0.5).chain(new Tone.Gain(0.3));
     const master = new Tone.Gain(3.0).toDestination();
 
+    // Connect main synth
     synth.chain(chorus, reverb, master);
     synth.chain(chorus, delay, reverb, master);
 
+    // Connect bass synth with less reverb
+    const bassGain = new Tone.Gain(0.15);
+    this.bassSynth.chain(bassGain, chorus, reverb);
+
+    bassGain.toDestination();
+
     this.synth = synth;
+  }
+
+  private playBassNote(): void {
+    if (!this.bassSynth) return;
+
+    const bassNote = PentatonicSynthPreset.BASS_LOOP[this.bassLoopIndex];
+    this.bassSynth.triggerAttack(bassNote);
+
+    // Advance to next note in loop
+    this.bassLoopIndex =
+      (this.bassLoopIndex + 1) % PentatonicSynthPreset.BASS_LOOP.length;
+  }
+
+  private releaseBassNote(): void {
+    if (!this.bassSynth) return;
+    this.bassSynth.triggerRelease();
   }
 
   private async playNote(note: Note): Promise<void> {

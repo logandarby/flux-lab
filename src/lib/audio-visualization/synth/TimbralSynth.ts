@@ -52,18 +52,12 @@ export class TimbralSynth extends Tone.Synth<TimbralSynthOptions> {
   private updateOscillatorType(): void {
     const timbre = this._timbre;
 
-    if (timbre < 0.2) {
+    if (timbre < 0.333) {
       // Sine wave region (0.0 - 0.2)
       this.oscillator.type = "sine";
-    } else if (timbre < 0.4) {
-      // Triangle wave region (0.2 - 0.4)
-      this.oscillator.type = "triangle";
-    } else if (timbre < 0.6) {
+    } else if (timbre < 0.666) {
       // Square wave region (0.4 - 0.6)
-      this.oscillator.type = "square";
-    } else if (timbre < 0.8) {
-      // Sawtooth wave region (0.6 - 0.8)
-      this.oscillator.type = "sawtooth";
+      this.oscillator.type = "triangle";
     } else {
       // Fat sawtooth region (0.8 - 1.0)
       this.oscillator.type = "fatsawtooth";
