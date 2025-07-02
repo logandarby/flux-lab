@@ -123,17 +123,14 @@ export class PentatonicSynthPreset implements AudioPreset {
     });
     const chorus = new Tone.Chorus(4, 10, 1);
     const delay = new Tone.PingPongDelay("4t", 0.5).chain(new Tone.Gain(0.3));
-    const master = new Tone.Gain(3.0).toDestination();
+    const master = new Tone.Gain(10.0).toDestination();
 
     // Connect main synth
     synth.chain(chorus, reverb, master);
     synth.chain(chorus, delay, reverb, master);
 
-    // Connect bass synth with less reverb
-    const bassGain = new Tone.Gain(0.15);
-    this.bassSynth.chain(bassGain, chorus, reverb);
-
-    bassGain.toDestination();
+    const bassMaster = new Tone.Gain(0.1).toDestination();
+    this.bassSynth.chain(bassMaster, chorus, reverb);
 
     this.synth = synth;
   }

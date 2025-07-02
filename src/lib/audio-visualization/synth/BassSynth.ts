@@ -32,7 +32,7 @@ export class BassSynth extends Tone.ToneAudioNode implements Voice {
       attack: 2,
       decay: 0.2,
       sustain: 0.8,
-      release: 3.0,
+      release: 7,
     });
 
     // Create primary filter with low cutoff for bass
@@ -54,7 +54,7 @@ export class BassSynth extends Tone.ToneAudioNode implements Voice {
       attack: 10.0,
       decay: 1.5,
       sustain: 0.3,
-      release: 3.0,
+      release: 7,
     });
 
     // Create LFO for filter frequency modulation
