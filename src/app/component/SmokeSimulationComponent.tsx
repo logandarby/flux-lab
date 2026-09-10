@@ -561,15 +561,14 @@ function SmokeSimulationComponent() {
                 className="text-neutral-400 text-base font-light tracking-wide text-center"
                 style={{ fontFamily: "Baskervville, serif" }}
               >
-                Music from movement.
+                Music from smoke
               </DialogDescription>
               <div className="w-16 h-px bg-neutral-600 mx-auto"></div>
               <DialogDescription
                 className="text-neutral-400 text-base font-light tracking-wide text-center"
                 style={{ fontFamily: "Baskervville, serif" }}
               >
-                Click and drag to synthesize. Seek the spectrum in the depths
-                below.
+                Click and drag to synthesize.
               </DialogDescription>
             </div>
           </DialogHeader>
